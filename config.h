@@ -1,9 +1,9 @@
-// ============================================================================
+//
 // FikcerAgent – Global Configuration
-// ============================================================================
+// 
 // Central place for all tuneable constants. Change values here instead of
 // scattering magic numbers throughout the codebase.
-// ============================================================================
+// 
 #pragma once
 
 #include <cstddef>
@@ -13,7 +13,7 @@
 
 namespace fikcer::config {
 
-// ── Monitoring ─────────────────────────────────────────────────────────────
+// ── Monitorin
 /// Interval (ms) between system-stats snapshots printed to the console.
 inline constexpr unsigned int MONITOR_INTERVAL_MS = 5000;
 
@@ -23,7 +23,7 @@ inline constexpr double CPU_WARNING_THRESHOLD = 90.0;
 /// Memory usage threshold (%) that triggers a warning log entry.
 inline constexpr double MEMORY_WARNING_THRESHOLD = 90.0;
 
-// ── Process Manager ────────────────────────────────────────────────────────
+// ── Process Manager 
 /// Interval (ms) between hung-process scans.
 inline constexpr unsigned int PROCESS_SCAN_INTERVAL_MS = 10000;
 
@@ -39,7 +39,7 @@ inline constexpr unsigned int RESTART_DELAY_MS = 2000;
 /// Maximum consecutive restart attempts per process before giving up.
 inline constexpr unsigned int MAX_RESTART_ATTEMPTS = 3;
 
-// ── Logger ─────────────────────────────────────────────────────────────────
+// ── Logger 
 /// Default log directory (relative to the executable).
 inline constexpr std::string_view LOG_DIRECTORY = "logs";
 
@@ -52,7 +52,7 @@ inline constexpr std::size_t MAX_LOG_FILES = 10;
 /// Log file base name.
 inline constexpr std::string_view LOG_FILE_PREFIX = "fikcerAgent";
 
-// ── Safety ─────────────────────────────────────────────────────────────────
+// ── Safety
 /// If true, the agent will only monitor and log — never kill/restart.
 inline constexpr bool DRY_RUN = false;
 

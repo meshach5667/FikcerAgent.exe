@@ -1,6 +1,6 @@
-// ============================================================================
+
 // FikcerAgent – System Monitor Implementation
-// ============================================================================
+
 #include "core/monitor.h"
 #include "utils/logger.h"
 
@@ -10,19 +10,23 @@
 
 #ifdef _WIN32
 #   include <Windows.h>
-#else
-    // Stubs so the file compiles on non-Windows (CI, static analysis, etc.)
+#elif defined(__APPLE__)
+#   include <mach/mach.h>
+#   include <mach/processor_info.h>
+#   include <mach/mach_host.h>
+#   include <sys/sysctl.h>
+#   include <sys/types.h>
 #endif
 
 namespace fikcer::core {
 
-// ── Lifetime ───────────────────────────────────────────────────────────────
+//  Lifetime
 
 Monitor::~Monitor() {
     stop();
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────
+//  Public API 
 
 void Monitor::setCallback(StatsCallback cb) {
     callback_ = std::move(cb);
@@ -69,7 +73,7 @@ bool Monitor::isRunning() const noexcept {
     return running_.load(std::memory_order_acquire);
 }
 
-// ── Worker loop ────────────────────────────────────────────────────────────
+// Worker loop 
 
 void Monitor::workerLoop(unsigned int intervalMs) {
     using clock = std::chrono::steady_clock;
@@ -78,25 +82,21 @@ void Monitor::workerLoop(unsigned int intervalMs) {
     while (running_.load(std::memory_order_acquire)) {
         SystemStats snap{};
 
-        // ── Memory ─────────────────────────────────────────────────────────
+        // ── Memory 
         if (!queryMemory(snap)) {
             logger.warn("Failed to query memory stats.");
         }
 
-        // ── CPU ────────────────────────────────────────────────────────────
-#ifdef _WIN32
+        // ── CPU
         snap.cpuUsagePercent = computeCpuUsage();
-#else
-        snap.cpuUsagePercent = 0.0;   // Stub for non-Windows builds.
-#endif
 
-        // ── Store latest ───────────────────────────────────────────────────
+        // ── Store lates
         {
             std::lock_guard lock(statsMutex_);
             latest_ = snap;
         }
 
-        // ── Notify callback ────────────────────────────────────────────────
+        // ── Notify callback 
         if (callback_) {
             try {
                 callback_(snap);
@@ -105,7 +105,7 @@ void Monitor::workerLoop(unsigned int intervalMs) {
             }
         }
 
-        // ── Sleep in small increments so stop() is responsive ──────────────
+        // ── Sleep in small increments so stop() is responsive
         const auto deadline = clock::now() + std::chrono::milliseconds(intervalMs);
         while (running_.load(std::memory_order_acquire) && clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -113,8 +113,7 @@ void Monitor::workerLoop(unsigned int intervalMs) {
     }
 }
 
-// ── Platform: Memory ───────────────────────────────────────────────────────
-
+// ── Platform: Memory 
 bool Monitor::queryMemory(SystemStats& out) {
 #ifdef _WIN32
     MEMORYSTATUSEX memInfo{};
@@ -129,14 +128,45 @@ bool Monitor::queryMemory(SystemStats& out) {
     out.memUsagePercent   = static_cast<double>(memInfo.dwMemoryLoad);
 
     return true;
+
+#elif defined(__APPLE__)
+    // ── Total physical RAM via sysctl
+    int mib[2] = { CTL_HW, HW_MEMSIZE };
+    uint64_t totalMem = 0;
+    size_t len = sizeof(totalMem);
+    if (sysctl(mib, 2, &totalMem, &len, nullptr, 0) != 0) {
+        return false;
+    }
+    out.memTotalBytes = totalMem;
+
+    // ── Free / available RAM via Mach vm_statistics64
+    vm_statistics64_data_t vmStat{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    kern_return_t kr = host_statistics64(
+        mach_host_self(), HOST_VM_INFO64,
+        reinterpret_cast<host_info64_t>(&vmStat), &count);
+
+    if (kr != KERN_SUCCESS) {
+        return false;
+    }
+
+    const uint64_t pageSize = static_cast<uint64_t>(vm_kernel_page_size);
+    const uint64_t freeMem  = (static_cast<uint64_t>(vmStat.free_count) +
+                               static_cast<uint64_t>(vmStat.inactive_count)) * pageSize;
+
+    out.memAvailableBytes = freeMem;
+    out.memUsagePercent   = (totalMem > 0)
+        ? (1.0 - static_cast<double>(freeMem) / static_cast<double>(totalMem)) * 100.0
+        : 0.0;
+
+    return true;
 #else
-    // Non-Windows stub.
     (void)out;
     return false;
 #endif
 }
 
-// ── Platform: CPU ──────────────────────────────────────────────────────────
+// ── Platform: CPU 
 
 #ifdef _WIN32
 
@@ -155,7 +185,6 @@ double Monitor::computeCpuUsage() {
     }
 
     if (firstCpuSample_) {
-        // Need two samples to compute a delta – store the first and return 0.
         prevIdleTime_   = idleTime;
         prevKernelTime_ = kernelTime;
         prevUserTime_   = userTime;
@@ -167,7 +196,6 @@ double Monitor::computeCpuUsage() {
     const uint64_t kernelDelta = fileTimeToU64(kernelTime) - fileTimeToU64(prevKernelTime_);
     const uint64_t userDelta   = fileTimeToU64(userTime)   - fileTimeToU64(prevUserTime_);
 
-    // kernel time includes idle time on Windows.
     const uint64_t totalDelta = kernelDelta + userDelta;
     double cpuPercent = 0.0;
     if (totalDelta > 0) {
@@ -175,10 +203,8 @@ double Monitor::computeCpuUsage() {
                             static_cast<double>(totalDelta)) * 100.0;
     }
 
-    // Clamp to [0, 100].
     cpuPercent = (cpuPercent < 0.0) ? 0.0 : (cpuPercent > 100.0) ? 100.0 : cpuPercent;
 
-    // Save for next delta.
     prevIdleTime_   = idleTime;
     prevKernelTime_ = kernelTime;
     prevUserTime_   = userTime;
@@ -186,6 +212,81 @@ double Monitor::computeCpuUsage() {
     return cpuPercent;
 }
 
-#endif // _WIN32
+#elif defined(__APPLE__)
+
+double Monitor::computeCpuUsage() {
+    // ── Collect per-CPU tick counts via Mach host_processor_info ────────────
+    natural_t            numCPUs = 0;
+    processor_info_array_t cpuInfo = nullptr;
+    mach_msg_type_number_t numCpuInfo = 0;
+
+    kern_return_t kr = host_processor_info(
+        mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+        &numCPUs, &cpuInfo, &numCpuInfo);
+
+    if (kr != KERN_SUCCESS) {
+        utils::Logger::instance().warn("host_processor_info() failed.");
+        return 0.0;
+    }
+
+    // Pack into a flat vector: [user, system, idle, nice] per CPU.
+    const std::size_t ticksPerCpu = CPU_STATE_MAX;
+    std::vector<uint64_t> curTicks(numCPUs * ticksPerCpu, 0);
+
+    for (natural_t i = 0; i < numCPUs; ++i) {
+        auto* info = reinterpret_cast<processor_cpu_load_info_data_t*>(
+            cpuInfo + static_cast<std::ptrdiff_t>(i * ticksPerCpu));
+        curTicks[i * ticksPerCpu + CPU_STATE_USER]   = info->cpu_ticks[CPU_STATE_USER];
+        curTicks[i * ticksPerCpu + CPU_STATE_SYSTEM] = info->cpu_ticks[CPU_STATE_SYSTEM];
+        curTicks[i * ticksPerCpu + CPU_STATE_IDLE]   = info->cpu_ticks[CPU_STATE_IDLE];
+        curTicks[i * ticksPerCpu + CPU_STATE_NICE]   = info->cpu_ticks[CPU_STATE_NICE];
+    }
+
+    // Deallocate the Mach-allocated array.
+    vm_deallocate(mach_task_self(),
+                  reinterpret_cast<vm_address_t>(cpuInfo),
+                  numCpuInfo * sizeof(integer_t));
+
+    if (firstCpuSample_) {
+        prevPerCpuTicks_ = std::move(curTicks);
+        firstCpuSample_  = false;
+        return 0.0;
+    }
+
+    // ── Compute delta across all CPUs ──────────────────────────────────────
+    uint64_t totalUser = 0, totalSystem = 0, totalIdle = 0, totalNice = 0;
+    const std::size_t entries = std::min(curTicks.size(), prevPerCpuTicks_.size());
+    const std::size_t cpuCount = entries / ticksPerCpu;
+
+    for (std::size_t i = 0; i < cpuCount; ++i) {
+        totalUser   += curTicks[i*ticksPerCpu + CPU_STATE_USER]
+                     - prevPerCpuTicks_[i*ticksPerCpu + CPU_STATE_USER];
+        totalSystem += curTicks[i*ticksPerCpu + CPU_STATE_SYSTEM]
+                     - prevPerCpuTicks_[i*ticksPerCpu + CPU_STATE_SYSTEM];
+        totalIdle   += curTicks[i*ticksPerCpu + CPU_STATE_IDLE]
+                     - prevPerCpuTicks_[i*ticksPerCpu + CPU_STATE_IDLE];
+        totalNice   += curTicks[i*ticksPerCpu + CPU_STATE_NICE]
+                     - prevPerCpuTicks_[i*ticksPerCpu + CPU_STATE_NICE];
+    }
+
+    prevPerCpuTicks_ = std::move(curTicks);
+
+    const uint64_t totalTicks = totalUser + totalSystem + totalIdle + totalNice;
+    if (totalTicks == 0) return 0.0;
+
+    double cpuPercent = static_cast<double>(totalUser + totalSystem + totalNice)
+                      / static_cast<double>(totalTicks) * 100.0;
+
+    cpuPercent = (cpuPercent < 0.0) ? 0.0 : (cpuPercent > 100.0) ? 100.0 : cpuPercent;
+    return cpuPercent;
+}
+
+#else
+
+double Monitor::computeCpuUsage() {
+    return 0.0;   // Unsupported platform stub.
+}
+
+#endif
 
 } // namespace fikcer::core

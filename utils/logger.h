@@ -1,9 +1,9 @@
-// ============================================================================
+
 // FikcerAgent – Logger Interface
-// ============================================================================
+
 // Thread-safe, rotating file logger.  All public methods are safe to call
 // from any thread without external synchronization.
-// ============================================================================
+
 #pragma once
 
 #include <cstddef>

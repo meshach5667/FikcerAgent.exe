@@ -1,6 +1,6 @@
-// ============================================================================
+
 // FikcerAgent – Logger Implementation
-// ============================================================================
+
 #include "utils/logger.h"
 
 #include <algorithm>
@@ -12,7 +12,7 @@
 
 namespace fikcer::utils {
 
-// ── Singleton ──────────────────────────────────────────────────────────────
+//  Singleton 
 Logger& Logger::instance() noexcept {
     static Logger inst;          // Meyers singleton – thread-safe in C++11+
     return inst;
@@ -22,7 +22,7 @@ Logger::~Logger() {
     shutdown();
 }
 
-// ── Initialization ─────────────────────────────────────────────────────────
+//  Initialization
 bool Logger::init(const std::filesystem::path& logDir,
                   std::string_view             filePrefix,
                   std::size_t                  maxFileSize,
@@ -70,7 +70,7 @@ void Logger::shutdown() {
     initialised_ = false;
 }
 
-// ── Public logging shortcuts ───────────────────────────────────────────────
+// ─ Public logging shortcuts
 void Logger::trace(std::string_view msg) { log(LogLevel::TRACE, msg); }
 void Logger::debug(std::string_view msg) { log(LogLevel::DEBUG, msg); }
 void Logger::info (std::string_view msg) { log(LogLevel::INFO,  msg); }
@@ -78,7 +78,7 @@ void Logger::warn (std::string_view msg) { log(LogLevel::WARN,  msg); }
 void Logger::error(std::string_view msg) { log(LogLevel::ERR,   msg); }
 void Logger::fatal(std::string_view msg) { log(LogLevel::FATAL, msg); }
 
-// ── Core log function ──────────────────────────────────────────────────────
+// ─ Core log function 
 void Logger::log(LogLevel level, std::string_view msg) {
     // Fast-reject: compare underlying integer to avoid lock.
     if (static_cast<std::uint8_t>(level) <
@@ -112,7 +112,7 @@ void Logger::log(LogLevel level, std::string_view msg) {
     rotateIfNeeded();
 }
 
-// ── Accessors ──────────────────────────────────────────────────────────────
+// ─Accessors 
 bool Logger::isOpen() const noexcept {
     std::lock_guard lock(mutex_);
     return initialised_ && stream_.is_open();
@@ -126,7 +126,7 @@ void Logger::setMinLevel(LogLevel level) noexcept {
     minLevel_ = level;
 }
 
-// ── Internal helpers ───────────────────────────────────────────────────────
+// ── Internal helpers 
 
 std::string Logger::currentTimestamp() const {
     using namespace std::chrono;

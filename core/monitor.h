@@ -1,16 +1,19 @@
-// ============================================================================
+
 // FikcerAgent – System Monitor Interface
-// ============================================================================
-// Periodically samples CPU and memory usage via the Windows API and exposes
-// the latest readings in a thread-safe manner.
+
+// Periodically samples CPU and memory usage and exposes the latest readings
+// in a thread-safe manner.
+//
+// Platform backends:
+//   • Windows : GetSystemTimes (CPU), GlobalMemoryStatusEx (RAM)
+//   • macOS   : host_processor_info (CPU), host_statistics64 (RAM)
 //
 // Design notes:
-//   • The monitor runs on its own std::jthread so it never blocks the main
+//   • The monitor runs on its own std::thread so it never blocks the main
 //     loop or the process-manager thread.
-//   • CPU usage is computed from the delta of idle / kernel / user times
-//     between two consecutive snapshots (GetSystemTimes).
-//   • Memory usage comes from GlobalMemoryStatusEx.
-// ============================================================================
+//   • CPU usage is computed from the delta of idle / total ticks between
+//     two consecutive snapshots.
+
 #pragma once
 
 #include <atomic>
@@ -19,9 +22,12 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #   include <Windows.h>
+#elif defined(__APPLE__)
+#   include <mach/mach.h>
 #endif
 
 namespace fikcer::core {
@@ -82,16 +88,20 @@ private:
     void workerLoop(unsigned int intervalMs);
 
     // ── Platform helpers ───────────────────────────────────────────────────
-    /// Query memory via GlobalMemoryStatusEx.
+    /// Query memory (platform-specific).
     static bool queryMemory(SystemStats& out);
 
-#ifdef _WIN32
-    /// Compute CPU % from two GetSystemTimes snapshots.
+    /// Compute CPU % from delta of two snapshots.
     double computeCpuUsage();
+
+#ifdef _WIN32
     FILETIME prevIdleTime_{};
     FILETIME prevKernelTime_{};
     FILETIME prevUserTime_{};
     bool     firstCpuSample_ = true;
+#elif defined(__APPLE__)
+    std::vector<uint64_t> prevPerCpuTicks_;   // [user,system,idle,nice] × N
+    bool                  firstCpuSample_ = true;
 #endif
 
     // ── State ──────────────────────────────────────────────────────────────

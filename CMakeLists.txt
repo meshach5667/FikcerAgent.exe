@@ -1,12 +1,12 @@
 # ============================================================================
 # FikcerAgent – Autonomous Self-Healing System Agent
-# CMake Build Configuration (Visual Studio 2022 / MSVC)
+# CMake Build Configuration (Visual Studio 2022 / MSVC / Xcode / Unix Makefiles)
 # ============================================================================
 cmake_minimum_required(VERSION 3.20)
 project(FikcerAgent
     VERSION   1.0.0
     LANGUAGES CXX
-    DESCRIPTION "Autonomous self-healing Windows system agent"
+    DESCRIPTION "Autonomous self-healing cross-platform system agent"
 )
 
 # ── C++ Standard ────────────────────────────────────────────────────────────
@@ -64,6 +64,15 @@ if(WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
     )
+elseif(APPLE)
+    # macOS: Mach kernel APIs for CPU, sysctl for memory, libproc for processes
+    find_library(CORE_FOUNDATION CoreFoundation)
+    find_library(IO_KIT IOKit)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        ${CORE_FOUNDATION}
+        ${IO_KIT}
+    )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE _DARWIN_C_SOURCE)
 endif()
 
 # ── Install ─────────────────────────────────────────────────────────────────
