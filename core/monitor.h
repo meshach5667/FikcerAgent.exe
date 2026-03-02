@@ -1,130 +1,105 @@
-/**
- * @file monitor.h
- * @brief System resource monitor – CPU and memory usage sampling.
- *
- * FikcerAgent – Autonomous Self-Healing System Agent
- * Module: Core / Monitor
- *
- * Responsibilities:
- *   - Periodically sample total CPU usage (%) via GetSystemTimes().
- *   - Periodically sample physical memory usage (%) via GlobalMemoryStatusEx().
- *   - Run the sampling loop on a dedicated background thread so it never
- *     blocks the main thread or any other module.
- *   - Expose the latest snapshot through a lock-free atomic struct.
- *
- * Thread-safety:
- *   - Start() / Stop() must be called from the same (main) thread.
- *   - GetSnapshot() is safe to call from any thread at any time.
- *
- * Security:
- *   - No external input is consumed; only Windows kernel counters are read.
- */
-
-#ifndef FIKCERAGENT_CORE_MONITOR_H
-#define FIKCERAGENT_CORE_MONITOR_H
+// ============================================================================
+// FikcerAgent – System Monitor Interface
+// ============================================================================
+// Periodically samples CPU and memory usage via the Windows API and exposes
+// the latest readings in a thread-safe manner.
+//
+// Design notes:
+//   • The monitor runs on its own std::jthread so it never blocks the main
+//     loop or the process-manager thread.
+//   • CPU usage is computed from the delta of idle / kernel / user times
+//     between two consecutive snapshots (GetSystemTimes).
+//   • Memory usage comes from GlobalMemoryStatusEx.
+// ============================================================================
+#pragma once
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
+#include <functional>
+#include <mutex>
+#include <string>
 #include <thread>
+
+#ifdef _WIN32
+#   include <Windows.h>
+#endif
 
 namespace fikcer::core {
 
-/**
- * @brief A lightweight, copyable snapshot of system resources.
- *
- * All fields are best-effort values sampled at the time indicated by
- * `timestamp_ms` (milliseconds since epoch).
- */
-struct SystemSnapshot {
-    double   cpu_usage_percent  = 0.0;   ///< Overall CPU utilisation [0..100].
-    double   mem_usage_percent  = 0.0;   ///< Physical RAM utilisation [0..100].
-    uint64_t mem_total_mb       = 0;     ///< Total physical RAM in MiB.
-    uint64_t mem_available_mb   = 0;     ///< Available physical RAM in MiB.
-    int64_t  timestamp_ms       = 0;     ///< Time of this sample (epoch ms).
+// ── Snapshot struct ────────────────────────────────────────────────────────
+/// A point-in-time reading of system resources.
+struct SystemStats {
+    double   cpuUsagePercent   = 0.0;   ///< Total CPU utilisation (0–100).
+    double   memUsagePercent   = 0.0;   ///< Physical RAM utilisation (0–100).
+    uint64_t memTotalBytes     = 0;     ///< Installed physical RAM.
+    uint64_t memAvailableBytes = 0;     ///< Available physical RAM.
 };
 
-/**
- * @class SystemMonitor
- * @brief Background thread that samples CPU and RAM every `interval`.
- *
- * Usage:
- *   SystemMonitor mon;
- *   mon.Start(std::chrono::seconds{5});
- *   ...
- *   auto snap = mon.GetSnapshot();
- *   ...
- *   mon.Stop();
- */
-class SystemMonitor final {
+// ── Callback type ──────────────────────────────────────────────────────────
+/// Called on the monitor thread each time a new snapshot is taken.
+using StatsCallback = std::function<void(const SystemStats&)>;
+
+// ────────────────────────────────────────────────────────────────────────────
+/// System resource monitor.
+///
+/// Usage:
+///   Monitor mon;
+///   mon.setCallback([](const SystemStats& s) { /* print or log */ });
+///   mon.start(5000);   // sample every 5 s
+///   ...
+///   mon.stop();
+// ────────────────────────────────────────────────────────────────────────────
+class Monitor final {
 public:
-    SystemMonitor()  = default;
-    ~SystemMonitor();
+    Monitor()  = default;
+    ~Monitor();
 
     // Non-copyable, non-movable (owns a thread).
-    SystemMonitor(const SystemMonitor&)            = delete;
-    SystemMonitor& operator=(const SystemMonitor&) = delete;
-    SystemMonitor(SystemMonitor&&)                 = delete;
-    SystemMonitor& operator=(SystemMonitor&&)      = delete;
+    Monitor(const Monitor&)            = delete;
+    Monitor& operator=(const Monitor&) = delete;
+    Monitor(Monitor&&)                 = delete;
+    Monitor& operator=(Monitor&&)      = delete;
 
-    /**
-     * @brief Launch the background sampling thread.
-     * @param interval  Time between two consecutive samples.
-     * @return true if the thread was started, false if already running.
-     */
-    bool Start(std::chrono::milliseconds interval = std::chrono::seconds{5});
+    /// Register a callback invoked on every sample.  Set before start().
+    void setCallback(StatsCallback cb);
 
-    /**
-     * @brief Request the background thread to stop and join it.
-     *        Safe to call even if not running.
-     */
-    void Stop() noexcept;
+    /// Begin monitoring on a background thread.
+    /// @param intervalMs  Milliseconds between samples.
+    /// @return true if the thread was launched successfully.
+    bool start(unsigned int intervalMs);
 
-    /**
-     * @brief Return the most recent system snapshot.
-     *        Lock-free; may be called from any thread.
-     */
-    [[nodiscard]] SystemSnapshot GetSnapshot() const noexcept;
+    /// Signal the monitor thread to stop and join it.
+    void stop();
 
-    /**
-     * @brief Check whether the monitor thread is active.
-     */
-    [[nodiscard]] bool IsRunning() const noexcept { return running_.load(std::memory_order_acquire); }
+    /// @return The most recent snapshot (lock-free read).
+    [[nodiscard]] SystemStats latestStats() const noexcept;
+
+    /// @return true if the background thread is running.
+    [[nodiscard]] bool isRunning() const noexcept;
 
 private:
-    /**
-     * @brief The sampling loop executed on the background thread.
-     */
-    void SamplingLoop(std::chrono::milliseconds interval);
+    // ── Thread entry point ─────────────────────────────────────────────────
+    void workerLoop(unsigned int intervalMs);
 
-    /**
-     * @brief Read the current CPU utilisation percentage.
-     *        Uses delta of GetSystemTimes() between two calls.
-     */
-    double SampleCpuUsage();
+    // ── Platform helpers ───────────────────────────────────────────────────
+    /// Query memory via GlobalMemoryStatusEx.
+    static bool queryMemory(SystemStats& out);
 
-    /**
-     * @brief Read the current memory utilisation via GlobalMemoryStatusEx().
-     */
-    void SampleMemoryUsage(SystemSnapshot& snap);
+#ifdef _WIN32
+    /// Compute CPU % from two GetSystemTimes snapshots.
+    double computeCpuUsage();
+    FILETIME prevIdleTime_{};
+    FILETIME prevKernelTime_{};
+    FILETIME prevUserTime_{};
+    bool     firstCpuSample_ = true;
+#endif
 
-    // ---- Data members ----------------------------------------------------
-    std::atomic<bool>   running_{false};
+    // ── State ──────────────────────────────────────────────────────────────
     std::thread         thread_;
-
-    // Snapshot shared between producer (bg thread) and consumer (any thread).
-    // Protected via a simple spin on a seqlock-style atomic counter, but for
-    // MVP simplicity we use a mutex-guarded copy (negligible contention at
-    // 5-second intervals).
-    mutable std::mutex  snap_mutex_;
-    SystemSnapshot      latest_snap_;
-
-    // Previous GetSystemTimes() values for delta calculation.
-    uint64_t prev_idle_   = 0;
-    uint64_t prev_kernel_ = 0;
-    uint64_t prev_user_   = 0;
+    std::atomic<bool>   running_{false};
+    StatsCallback       callback_;
+    mutable std::mutex  statsMutex_;
+    SystemStats         latest_;
 };
 
-}  // namespace fikcer::core
-
-#endif  // FIKCERAGENT_CORE_MONITOR_H
+} // namespace fikcer::core

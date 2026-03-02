@@ -1,25 +1,13 @@
-/**
- * @file logger.h
- * @brief Thread-safe logging utility with timestamped output and log rotation.
- *
- * FikcerAgent – Autonomous Self-Healing System Agent
- * Module: Utils / Logger
- *
- * Responsibilities:
- *   - Write log entries to a timestamped file and optionally to stderr.
- *   - Rotate log files when they exceed a configurable size threshold.
- *   - Guarantee thread safety so any module can log from any thread.
- *
- * Security notes:
- *   - File paths are validated before opening.
- *   - No user-supplied strings are interpreted as format specifiers.
- */
+// ============================================================================
+// FikcerAgent – Logger Interface
+// ============================================================================
+// Thread-safe, rotating file logger.  All public methods are safe to call
+// from any thread without external synchronization.
+// ============================================================================
+#pragma once
 
-#ifndef FIKCERAGENT_UTILS_LOGGER_H
-#define FIKCERAGENT_UTILS_LOGGER_H
-
-#include <cstddef>     // size_t
-#include <filesystem>  // std::filesystem::path
+#include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -27,130 +15,107 @@
 
 namespace fikcer::utils {
 
-/// Severity levels – ordered by increasing severity.
-enum class LogLevel : int {
-    kDebug = 0,
-    kInfo  = 1,
-    kWarn  = 2,
-    kError = 3,
-    kFatal = 4,
+/// Severity levels – stored as `uint8_t` under the hood for speed.
+enum class LogLevel : std::uint8_t {
+    TRACE = 0,
+    DEBUG = 1,
+    INFO  = 2,
+    WARN  = 3,
+    ERR   = 4,   // "ERROR" clashes with Windows macros
+    FATAL = 5,
 };
 
-/**
- * @brief Converts a LogLevel to its human-readable tag.
- */
-[[nodiscard]] constexpr std::string_view LogLevelToString(LogLevel level) noexcept {
+/// Convert a LogLevel to its short tag (e.g. "INFO", "WARN").
+[[nodiscard]] constexpr std::string_view logLevelTag(LogLevel level) noexcept {
     switch (level) {
-        case LogLevel::kDebug: return "DEBUG";
-        case LogLevel::kInfo:  return "INFO ";
-        case LogLevel::kWarn:  return "WARN ";
-        case LogLevel::kError: return "ERROR";
-        case LogLevel::kFatal: return "FATAL";
-        default:               return "?????";
+        case LogLevel::TRACE: return "TRACE";
+        case LogLevel::DEBUG: return "DEBUG";
+        case LogLevel::INFO:  return "INFO ";
+        case LogLevel::WARN:  return "WARN ";
+        case LogLevel::ERR:   return "ERROR";
+        case LogLevel::FATAL: return "FATAL";
     }
+    return "?????";
 }
 
-/**
- * @class Logger
- * @brief Singleton, thread-safe file logger with automatic rotation.
- *
- * Usage:
- *   Logger::Instance().Init("logs", 5 * 1024 * 1024);  // 5 MiB max
- *   Logger::Instance().Log(LogLevel::kInfo, "System started");
- */
+// ────────────────────────────────────────────────────────────────────────────
+/// Thread-safe rotating file logger (singleton).
+///
+/// Usage:
+///   auto& log = Logger::instance();
+///   log.init("logs", "fikcerAgent", 5*1024*1024, 10);
+///   log.info("System started");
+///   log.error("Failed to open handle: {}", GetLastError());
+// ────────────────────────────────────────────────────────────────────────────
 class Logger final {
 public:
-    // ---- Singleton access ------------------------------------------------
-    [[nodiscard]] static Logger& Instance() noexcept;
+    // ── Singleton access ───────────────────────────────────────────────────
+    [[nodiscard]] static Logger& instance() noexcept;
 
-    // Non-copyable, non-movable (singleton).
+    // Non-copyable, non-movable
     Logger(const Logger&)            = delete;
     Logger& operator=(const Logger&) = delete;
     Logger(Logger&&)                 = delete;
     Logger& operator=(Logger&&)      = delete;
 
-    // ---- Configuration ---------------------------------------------------
+    // ── Initialization ─────────────────────────────────────────────────────
+    /// @param logDir       Directory for log files (created if absent).
+    /// @param filePrefix   Base name for log files.
+    /// @param maxFileSize  Max bytes per file before rotation.
+    /// @param maxFiles     Max rotated files to keep.
+    /// @param minLevel     Minimum severity to record.
+    /// @return true on success.
+    bool init(const std::filesystem::path& logDir,
+              std::string_view             filePrefix,
+              std::size_t                  maxFileSize,
+              std::size_t                  maxFiles,
+              LogLevel                     minLevel = LogLevel::INFO);
 
-    /**
-     * @brief Initialise the logger.  Must be called once before any Log().
-     * @param log_directory  Folder where log files are stored (created if absent).
-     * @param max_file_bytes Maximum size of a single log file before rotation.
-     * @param min_level      Minimum severity that will be written.
-     * @param echo_stderr    Also print to stderr when true.
-     * @return true on success, false if the directory could not be created.
-     */
-    bool Init(const std::filesystem::path& log_directory,
-              std::size_t max_file_bytes = 5 * 1024 * 1024,
-              LogLevel min_level         = LogLevel::kInfo,
-              bool echo_stderr           = true);
+    /// Flush and close the log file.
+    void shutdown();
 
-    /**
-     * @brief Flush and close the current log file.  Safe to call multiple times.
-     */
-    void Shutdown() noexcept;
+    // ── Logging shortcuts ──────────────────────────────────────────────────
+    void trace(std::string_view msg);
+    void debug(std::string_view msg);
+    void info (std::string_view msg);
+    void warn (std::string_view msg);
+    void error(std::string_view msg);
+    void fatal(std::string_view msg);
 
-    // ---- Logging ---------------------------------------------------------
+    /// Generic log call.
+    void log(LogLevel level, std::string_view msg);
 
-    /**
-     * @brief Write a single log entry.
-     * @param level    Severity.
-     * @param message  The text to log (no trailing newline needed).
-     */
-    void Log(LogLevel level, std::string_view message);
-
-    // Convenience wrappers.
-    void Debug(std::string_view msg) { Log(LogLevel::kDebug, msg); }
-    void Info(std::string_view msg)  { Log(LogLevel::kInfo,  msg); }
-    void Warn(std::string_view msg)  { Log(LogLevel::kWarn,  msg); }
-    void Error(std::string_view msg) { Log(LogLevel::kError, msg); }
-    void Fatal(std::string_view msg) { Log(LogLevel::kFatal, msg); }
+    // ── Accessors ──────────────────────────────────────────────────────────
+    [[nodiscard]] bool     isOpen()      const noexcept;
+    [[nodiscard]] LogLevel minLevel()    const noexcept;
+    void                   setMinLevel(LogLevel level) noexcept;
 
 private:
     Logger() = default;
     ~Logger();
 
-    // ---- Internal helpers ------------------------------------------------
+    // ── Internal helpers ───────────────────────────────────────────────────
+    void        rotateIfNeeded();
+    void        rotate();
+    std::string currentTimestamp() const;
+    [[nodiscard]] std::filesystem::path logFilePath(std::size_t index) const;
 
-    /**
-     * @brief Generate a new log filename based on the current timestamp.
-     */
-    [[nodiscard]] std::filesystem::path MakeLogFilePath() const;
-
-    /**
-     * @brief Open (or rotate to) a fresh log file.  Caller must hold mutex_.
-     */
-    bool OpenNewFile();
-
-    /**
-     * @brief Rotate the log if the current file exceeds max_file_bytes_.
-     *        Caller must hold mutex_.
-     */
-    void RotateIfNeeded();
-
-    /**
-     * @brief Build a "[YYYY-MM-DD HH:MM:SS.mmm]" timestamp string.
-     */
-    [[nodiscard]] static std::string Timestamp();
-
-    // ---- Data members (all guarded by mutex_) ----------------------------
-    std::mutex               mutex_;
-    std::ofstream            file_;
-    std::filesystem::path    log_dir_;
-    std::size_t              max_file_bytes_ = 5 * 1024 * 1024;
-    std::size_t              current_bytes_  = 0;
-    LogLevel                 min_level_      = LogLevel::kInfo;
-    bool                     echo_stderr_    = true;
-    bool                     initialised_    = false;
+    // ── State ──────────────────────────────────────────────────────────────
+    mutable std::mutex          mutex_;
+    std::ofstream               stream_;
+    std::filesystem::path       logDir_;
+    std::string                 filePrefix_;
+    std::size_t                 maxFileSize_ = 0;
+    std::size_t                 maxFiles_    = 0;
+    LogLevel                    minLevel_    = LogLevel::INFO;
+    std::size_t                 currentSize_ = 0;
+    bool                        initialised_ = false;
 };
 
-}  // namespace fikcer::utils
+// ── Convenience macros (optional) ──────────────────────────────────────────
+// Prefer the method calls; macros are provided for quick prototyping only.
+#define FIKCER_LOG_INFO(msg)  ::fikcer::utils::Logger::instance().info(msg)
+#define FIKCER_LOG_WARN(msg)  ::fikcer::utils::Logger::instance().warn(msg)
+#define FIKCER_LOG_ERROR(msg) ::fikcer::utils::Logger::instance().error(msg)
 
-// ---- Macros for convenience (optional) ------------------------------------
-// These are short-hands that automatically use the singleton instance.
-#define FIKCER_LOG_DEBUG(msg) ::fikcer::utils::Logger::Instance().Debug(msg)
-#define FIKCER_LOG_INFO(msg)  ::fikcer::utils::Logger::Instance().Info(msg)
-#define FIKCER_LOG_WARN(msg)  ::fikcer::utils::Logger::Instance().Warn(msg)
-#define FIKCER_LOG_ERROR(msg) ::fikcer::utils::Logger::Instance().Error(msg)
-#define FIKCER_LOG_FATAL(msg) ::fikcer::utils::Logger::Instance().Fatal(msg)
-
-#endif  // FIKCERAGENT_UTILS_LOGGER_H
+} // namespace fikcer::utils
