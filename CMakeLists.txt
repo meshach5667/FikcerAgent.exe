@@ -37,6 +37,8 @@ set(SOURCES
     main.cpp
     core/monitor.cpp
     actions/process_manager.cpp
+    actions/auto_healer.cpp
+    ai/anomaly_detector.cpp
     utils/logger.cpp
 )
 
@@ -44,6 +46,8 @@ set(HEADERS
     config.h
     core/monitor.h
     actions/process_manager.h
+    actions/auto_healer.h
+    ai/anomaly_detector.h
     utils/logger.h
 )
 

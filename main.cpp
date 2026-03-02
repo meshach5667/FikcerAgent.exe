@@ -12,7 +12,9 @@
 
 #include "config.h"
 #include "core/monitor.h"
+#include "ai/anomaly_detector.h"
 #include "actions/process_manager.h"
+#include "actions/auto_healer.h"
 #include "utils/logger.h"
 
 #include <atomic>
@@ -123,9 +125,11 @@ R"(
   ║    FikcerAgent v1.0 – Self-Healing System Agent   ║
   ╠═══════════════════════════════════════════════════╣
   ║  Modules:                                         ║
-  ║    [✓] System Monitor  (CPU + RAM)                ║
-  ║    [✓] Process Manager (hung-app detection)       ║
-  ║    [✓] Logger          (rotating file log)        ║
+  ║    [✓] System Monitor    (CPU + RAM)              ║
+  ║    [✓] Process Manager   (hung-app detection)     ║
+  ║    [✓] Anomaly Detector  (AI intelligence)        ║
+  ║    [✓] Auto-Healer       (self-healing engine)    ║
+  ║    [✓] Logger            (rotating file log)      ║
   ║                                                   ║
   ║  Press Ctrl+C or Enter to shut down gracefully.   ║
   -----------------------------------------------------
@@ -205,13 +209,70 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // ── 5. Main-thread idle loop 
+    // ── 5. Start Anomaly Detector (AI Intelligence)
+    ai::AnomalyDetector detector;
+
+    // ── 6. Create Auto-Healer (Self-Healing Engine)
+    actions::AutoHealer healer(procMgr);
+
+    // Anomaly callback → feed into healer + console output.
+    detector.setCallback([&healer](const std::vector<ai::Anomaly>& anomalies) {
+        // Print anomalies to console.
+        for (const auto& a : anomalies) {
+            std::ostringstream oss;
+            oss << "[AI] " << ai::anomalyTag(a.type) << " ["
+                << ai::severityTag(a.severity) << "] " << a.description;
+
+            // Colour by severity.
+            const char* color = "\033[1;33m";  // Yellow default.
+            if (a.severity >= ai::Severity::HIGH)     color = "\033[1;31m"; // Red.
+            if (a.severity >= ai::Severity::CRITICAL)  color = "\033[1;35m"; // Magenta.
+
+            std::cout << color << oss.str() << "\033[0m\n";
+        }
+
+        // Let the healer act.
+        auto records = healer.handleAnomalies(anomalies);
+
+        for (const auto& r : records) {
+            if (r.action != actions::HealAction::LOG_ONLY) {
+                std::cout << "\033[1;32m[HEAL] " << r.description
+                          << "\033[0m\n";
+            }
+        }
+    });
+
+    // Heal callback for logging.
+    healer.setCallback([](const actions::HealRecord& rec) {
+        std::ostringstream oss;
+        oss << "Heal action: " << rec.description
+            << " (success=" << (rec.success ? "yes" : "no") << ")";
+        utils::Logger::instance().info(oss.str());
+    });
+
+    // ── 7. Main-thread loop with AI analysis
     // Block until the user presses Enter or a signal arrives.
     logger.info("All modules running. Waiting for shutdown signal...");
 
+    auto lastAiScan = std::chrono::steady_clock::now();
+
     while (!g_shutdownRequested.load(std::memory_order_acquire)) {
-        // Check every 500 ms so we react to Ctrl+C promptly.
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        // Periodically run AI analysis pass.
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - lastAiScan).count();
+
+        if (elapsed >= config::AI_SCAN_INTERVAL_MS) {
+            lastAiScan = now;
+
+            // Sample per-process resources and feed to anomaly detector.
+            auto procResources = ai::AnomalyDetector::sampleProcessResources();
+            auto latestStats = monitor.latestStats();
+
+            detector.feed(latestStats, procResources);
+        }
 
         // Also check if stdin has data (Enter pressed) – non-blocking peek.
 #ifdef _WIN32
@@ -221,9 +282,15 @@ int main() {
 #endif
     }
 
-    // ── 6. Graceful shutdown 
+    // ── 8. Graceful shutdown
     std::cout << "\n[*] Shutting down FikcerAgent...\n";
     logger.info(" FikcerAgent shutting down ");
+
+    // Print final AI stats.
+    std::cout << "[*] Heal stats: "
+              << healer.totalTerminations() << " terminations, "
+              << healer.totalRestarts() << " restarts, "
+              << healer.totalPurgeCaches() << " cache purges.\n";
 
     procMgr.stop();
     monitor.stop();

@@ -52,7 +52,29 @@ inline constexpr std::size_t MAX_LOG_FILES = 10;
 /// Log file base name.
 inline constexpr std::string_view LOG_FILE_PREFIX = "fikcerAgent";
 
-// ── Safety
+// ── AI / Anomaly Detection ─────────────────────────────────────────────────
+/// Interval (ms) between AI analysis passes.
+inline constexpr unsigned int AI_SCAN_INTERVAL_MS = 5000;
+
+/// A single process using more than this % CPU is flagged as a hog.
+inline constexpr double PROCESS_CPU_HOG_THRESHOLD = 80.0;
+
+/// A single process using more than this amount of RAM is flagged.
+inline constexpr uint64_t PROCESS_MEM_HOG_BYTES = 2ULL * 1024 * 1024 * 1024; // 2 GB
+
+/// Number of consecutive samples for memory-leak detection window.
+inline constexpr unsigned int MEMORY_LEAK_WINDOW_SAMPLES = 12;
+
+/// CPU ramp threshold – % increase per sample that triggers a ramp alert.
+inline constexpr double CPU_RAMP_DELTA = 15.0;
+
+/// Minimum cooldown (ms) between heal actions on the same PID.
+inline constexpr unsigned int HEAL_COOLDOWN_MS = 30000;
+
+/// Maximum heal attempts per PID before the healer gives up.
+inline constexpr unsigned int MAX_HEAL_ATTEMPTS_PER_PID = 3;
+
+// ── Safety ─────────────────────────────────────────────────────────────────
 /// If true, the agent will only monitor and log — never kill/restart.
 inline constexpr bool DRY_RUN = false;
 

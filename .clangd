@@ -1,0 +1,7 @@
+CompileFlags:
+  Add:
+    - "-std=c++20"
+    - "-D__APPLE__"
+    - "-D_DARWIN_C_SOURCE"
+    - "-I."
+  Compiler: clang++
