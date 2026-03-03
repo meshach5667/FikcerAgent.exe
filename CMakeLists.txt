@@ -36,19 +36,26 @@ endif()
 set(SOURCES
     main.cpp
     core/monitor.cpp
+    core/system_scanner.cpp
     actions/process_manager.cpp
     actions/auto_healer.cpp
+    actions/system_fixer.cpp
     ai/anomaly_detector.cpp
+    ai/gemini_client.cpp
     utils/logger.cpp
 )
 
 set(HEADERS
     config.h
     core/monitor.h
+    core/system_scanner.h
     actions/process_manager.h
     actions/auto_healer.h
+    actions/system_fixer.h
     ai/anomaly_detector.h
+    ai/gemini_client.h
     utils/logger.h
+    utils/exec.h
 )
 
 # ── Executable ──────────────────────────────────────────────────────────────
@@ -78,6 +85,11 @@ elseif(APPLE)
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE _DARWIN_C_SOURCE)
 endif()
+
+# ── libcurl (Gemini API) ────────────────────────────────────────────────────
+find_package(CURL REQUIRED)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${CURL_LIBRARIES})
 
 # ── Install ─────────────────────────────────────────────────────────────────
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)

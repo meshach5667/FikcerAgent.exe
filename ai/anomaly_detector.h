@@ -39,6 +39,17 @@ enum class AnomalyType : uint8_t {
     PROCESS_CPU_HOG   = 5,   // Single process hogging CPU
     PROCESS_MEM_HOG   = 6,   // Single process hogging memory
     SYSTEM_OVERLOAD   = 7,   // Both CPU and RAM critical simultaneously
+    // ── System-level types (detected by deep scan + Gemini) ────────────
+    DISK_SPACE_LOW    = 10,  // Disk partition running out of space
+    DISK_HEALTH_WARN  = 11,  // Disk SMART warnings
+    NETWORK_DOWN      = 12,  // Internet connectivity lost
+    DNS_FAILURE       = 13,  // DNS resolution failing or slow
+    MALWARE_DETECTED  = 14,  // Suspicious / malicious process found
+    HIGH_TEMPERATURE  = 15,  // CPU overheating
+    BATTERY_CRITICAL  = 16,  // Battery dangerously low
+    FIREWALL_DISABLED = 17,  // System firewall is off
+    DRIVER_ISSUE      = 18,  // Driver problem (Windows)
+    INTEGRITY_ERROR   = 19,  // System file integrity issue
 };
 
 enum class Severity : uint8_t {
@@ -61,14 +72,24 @@ enum class Severity : uint8_t {
 
 [[nodiscard]] constexpr std::string_view anomalyTag(AnomalyType t) noexcept {
     switch (t) {
-        case AnomalyType::NONE:            return "NONE";
-        case AnomalyType::CPU_SPIKE:       return "CPU_SPIKE";
-        case AnomalyType::CPU_RAMP:        return "CPU_RAMP";
-        case AnomalyType::MEMORY_SPIKE:    return "MEMORY_SPIKE";
-        case AnomalyType::MEMORY_LEAK:     return "MEMORY_LEAK";
-        case AnomalyType::PROCESS_CPU_HOG: return "PROC_CPU_HOG";
-        case AnomalyType::PROCESS_MEM_HOG: return "PROC_MEM_HOG";
-        case AnomalyType::SYSTEM_OVERLOAD: return "SYS_OVERLOAD";
+        case AnomalyType::NONE:              return "NONE";
+        case AnomalyType::CPU_SPIKE:         return "CPU_SPIKE";
+        case AnomalyType::CPU_RAMP:          return "CPU_RAMP";
+        case AnomalyType::MEMORY_SPIKE:      return "MEMORY_SPIKE";
+        case AnomalyType::MEMORY_LEAK:       return "MEMORY_LEAK";
+        case AnomalyType::PROCESS_CPU_HOG:   return "PROC_CPU_HOG";
+        case AnomalyType::PROCESS_MEM_HOG:   return "PROC_MEM_HOG";
+        case AnomalyType::SYSTEM_OVERLOAD:   return "SYS_OVERLOAD";
+        case AnomalyType::DISK_SPACE_LOW:    return "DISK_LOW";
+        case AnomalyType::DISK_HEALTH_WARN:  return "DISK_HEALTH";
+        case AnomalyType::NETWORK_DOWN:      return "NET_DOWN";
+        case AnomalyType::DNS_FAILURE:       return "DNS_FAIL";
+        case AnomalyType::MALWARE_DETECTED:  return "MALWARE";
+        case AnomalyType::HIGH_TEMPERATURE:  return "HIGH_TEMP";
+        case AnomalyType::BATTERY_CRITICAL:  return "BATT_CRIT";
+        case AnomalyType::FIREWALL_DISABLED: return "FW_OFF";
+        case AnomalyType::DRIVER_ISSUE:      return "DRIVER";
+        case AnomalyType::INTEGRITY_ERROR:   return "INTEGRITY";
     }
     return "UNKNOWN";
 }

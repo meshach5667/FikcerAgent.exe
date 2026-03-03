@@ -1,10 +1,15 @@
 //
 // FikcerAgent – Entry Point
 // 
-// Ties together the three modules:
-//   1. Logger   (utils)   – initialised first so every module can log.
-//   2. Monitor  (core)    – background thread printing CPU / RAM stats.
-//   3. Process Manager    – background thread scanning for hung apps.
+// Ties together all modules:
+//   1. Logger          (utils)   – initialised first so every module can log.
+//   2. Monitor         (core)    – background thread printing CPU / RAM stats.
+//   3. Process Manager (actions) – background thread scanning for hung apps.
+//   4. Anomaly Detector(ai)      – heuristic real-time anomaly detection.
+//   5. Gemini Client   (ai)      – Google Gemini API for real AI analysis.
+//   6. System Scanner  (core)    – deep system diagnostics (disk, net, malware…).
+//   7. Auto-Healer     (actions) – fixes process-level issues.
+//   8. System Fixer    (actions) – fixes system-level issues from Gemini AI.
 //
 // The main thread blocks on user input so the console stays interactive;
 // pressing Enter (or Ctrl+C) triggers a graceful shutdown.
@@ -12,9 +17,12 @@
 
 #include "config.h"
 #include "core/monitor.h"
+#include "core/system_scanner.h"
 #include "ai/anomaly_detector.h"
+#include "ai/gemini_client.h"
 #include "actions/process_manager.h"
 #include "actions/auto_healer.h"
+#include "actions/system_fixer.h"
 #include "utils/logger.h"
 
 #include <atomic>
@@ -122,13 +130,16 @@ static void printBanner() {
     std::cout <<
 R"(
   ╔══════════════════════════════════════════════════╗
-  ║    FikcerAgent v1.0 – Self-Healing System Agent   ║
+  ║   FikcerAgent v2.0 – AI Self-Healing System Agent ║
   ╠═══════════════════════════════════════════════════╣
   ║  Modules:                                         ║
   ║    [✓] System Monitor    (CPU + RAM)              ║
   ║    [✓] Process Manager   (hung-app detection)     ║
-  ║    [✓] Anomaly Detector  (AI intelligence)        ║
-  ║    [✓] Auto-Healer       (self-healing engine)    ║
+  ║    [✓] Anomaly Detector  (heuristic engine)       ║
+  ║    [✓] Gemini AI         (deep system analysis)   ║
+  ║    [✓] System Scanner    (disk/net/malware/hw)    ║
+  ║    [✓] Auto-Healer       (process fixes)          ║
+  ║    [✓] System Fixer      (OS-level fixes)         ║
   ║    [✓] Logger            (rotating file log)      ║
   ║                                                   ║
   ║  Press Ctrl+C or Enter to shut down gracefully.   ║

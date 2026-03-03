@@ -53,8 +53,18 @@ inline constexpr std::size_t MAX_LOG_FILES = 10;
 inline constexpr std::string_view LOG_FILE_PREFIX = "fikcerAgent";
 
 // ── AI / Anomaly Detection ─────────────────────────────────────────────────
-/// Interval (ms) between AI analysis passes.
+/// Interval (ms) between heuristic AI analysis passes.
 inline constexpr unsigned int AI_SCAN_INTERVAL_MS = 5000;
+
+/// Interval (ms) between deep system scans + Gemini analysis.
+/// Longer interval because it involves network calls and shell commands.
+inline constexpr unsigned int DEEP_SCAN_INTERVAL_MS = 60000;  // 60 seconds
+
+/// Gemini model to use (gemini-2.0-flash is fast and cheap).
+inline constexpr std::string_view GEMINI_MODEL = "gemini-2.0-flash";
+
+/// Maximum Gemini API calls per hour (rate limiting).
+inline constexpr unsigned int GEMINI_MAX_CALLS_PER_HOUR = 30;
 
 /// A single process using more than this % CPU is flagged as a hog.
 inline constexpr double PROCESS_CPU_HOG_THRESHOLD = 80.0;
