@@ -521,7 +521,7 @@ std::string SystemScanner::generateReport(
     uint64_t memTotal, uint64_t memAvail)
 {
     constexpr double GB = 1024.0 * 1024.0 * 1024.0;
-    constexpr double MB = 1024.0 * 1024.0;
+    [[maybe_unused]] constexpr double MB = 1024.0 * 1024.0;
 
     std::ostringstream r;
     r << std::fixed << std::setprecision(1);
