@@ -1,4 +1,4 @@
-# ── Build outputs ───────────────────────────────────────────────────────────
+
 build/
 out/
 x64/
@@ -15,13 +15,13 @@ Release/
 *.idb
 .env
 
-# ── CMake ───────────────────────────────────────────────────────────────────
+
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 CMakeSettings.json
 
-# ── Visual Studio ───────────────────────────────────────────────────────────
+
 .vs/
 *.vcxproj
 *.vcxproj.filters
@@ -32,10 +32,10 @@ CMakeSettings.json
 *.sdf
 *.ipch
 
-# ── Logs produced at runtime ────────────────────────────────────────────────
+
 logs/
 
-# ── OS junk ─────────────────────────────────────────────────────────────────
+
 .DS_Store
 Thumbs.db
 desktop.ini

@@ -4,9 +4,9 @@
 # ============================================================================
 cmake_minimum_required(VERSION 3.20)
 project(FikcerAgent
-    VERSION   1.0.0
+    VERSION   2.0.0
     LANGUAGES CXX
-    DESCRIPTION "Autonomous self-healing cross-platform system agent"
+    DESCRIPTION "Autonomous self-healing cross-platform system agent with GUI"
 )
 
 # ── C++ Standard ────────────────────────────────────────────────────────────
@@ -16,25 +16,31 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ── Compiler Flags ──────────────────────────────────────────────────────────
 if(MSVC)
-    # /W4   – high warning level
-    # /WX   – treat warnings as errors
-    # /sdl  – additional security checks
-    # /GS   – buffer-overrun security checks
-    # /guard:cf – control-flow guard
-    # /permissive- – strict standard conformance
     add_compile_options(/W4 /WX /sdl /GS /guard:cf /permissive-)
-
-    # Release-specific optimizations
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /GL /DNDEBUG")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
 else()
-    # GCC/Clang for cross-compilation or CI
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror -O2)
+    # -Wno-deprecated-declarations silences macOS OpenGL deprecation warnings
+    add_compile_options(-Wall -Wextra -Wpedantic -O2
+                        -Wno-deprecated-declarations)
 endif()
 
-# ── Source Files ────────────────────────────────────────────────────────────
+# ── Dear ImGui Sources ──────────────────────────────────────────────────────
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/vendor/imgui)
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+
+# ── Application Sources ────────────────────────────────────────────────────
 set(SOURCES
     main.cpp
+    gui/app.cpp
     core/monitor.cpp
     core/system_scanner.cpp
     actions/process_manager.cpp
@@ -47,6 +53,7 @@ set(SOURCES
 
 set(HEADERS
     config.h
+    gui/app.h
     core/monitor.h
     core/system_scanner.h
     actions/process_manager.h
@@ -59,24 +66,37 @@ set(HEADERS
 )
 
 # ── Executable ──────────────────────────────────────────────────────────────
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+add_executable(${PROJECT_NAME} ${SOURCES} ${IMGUI_SOURCES} ${HEADERS})
 
-# Include root so headers can be included as "core/monitor.h" etc.
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
+# Include paths: project root + Dear ImGui + ImGui backends
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
+
+# ── GLFW ────────────────────────────────────────────────────────────────────
+find_package(glfw3 3.3 REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+
+# ── OpenGL ──────────────────────────────────────────────────────────────────
+if(APPLE)
+    find_library(OPENGL_FRAMEWORK OpenGL)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${OPENGL_FRAMEWORK})
+else()
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
+endif()
 
 # ── Platform Libraries ──────────────────────────────────────────────────────
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        psapi       # Process enumeration (EnumProcesses)
-        user32      # IsHungAppWindow, SendMessageTimeout
-        advapi32    # Security / privilege APIs
+        psapi user32 advapi32
     )
-    # Unicode build
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
     )
 elseif(APPLE)
-    # macOS: Mach kernel APIs for CPU, sysctl for memory, libproc for processes
     find_library(CORE_FOUNDATION CoreFoundation)
     find_library(IO_KIT IOKit)
     target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -90,6 +110,13 @@ endif()
 find_package(CURL REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${CURL_LIBRARIES})
+
+# ── Suppress warnings in Dear ImGui vendor code ────────────────────────────
+if(NOT MSVC)
+    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES
+        COMPILE_FLAGS "-w"
+    )
+endif()
 
 # ── Install ─────────────────────────────────────────────────────────────────
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
