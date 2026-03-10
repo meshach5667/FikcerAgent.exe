@@ -1,6 +1,6 @@
 // ============================================================================
 // FikcerAgent – Dear ImGui Desktop GUI Application
-// ============================================================================
+
 // Renders a user-friendly desktop window with:
 //   • Dashboard   – real-time CPU/RAM gauges + health status
 //   • Alerts      – colour-coded anomaly list in plain English
@@ -9,7 +9,7 @@
 //   • Log Viewer  – scrollable recent log lines
 //
 // Backed by Dear ImGui + GLFW + OpenGL 3.
-// ============================================================================
+
 #pragma once
 
 #include "core/monitor.h"
