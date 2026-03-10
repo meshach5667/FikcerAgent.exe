@@ -61,7 +61,7 @@ std::vector<Anomaly> HeuristicAnalyzer::analyse(
     return anomalies;
 }
 
-// ── Tuning setters ─────────────────────────────────────────────────────────
+// ── Tuning setters 
 
 void HeuristicAnalyzer::setCpuSpikeThreshold(double p, unsigned int n) {
     cpuSpikeThreshold_ = p; cpuSpikeConsecutive_ = n;
@@ -163,8 +163,7 @@ void HeuristicAnalyzer::detectMemorySpike(
     }
 }
 
-// ── Detection: Memory Leak ─────────────────────────────────────────────────
-
+// ── Detection: Memory Leak 
 void HeuristicAnalyzer::detectMemoryLeak(
     const core::SystemStats& /*stats*/, std::vector<Anomaly>& out)
 {
