@@ -1,4 +1,4 @@
-// ============================================================================
+/
 // FikcerAgent – Dear ImGui Desktop GUI Application
 
 // Renders a user-friendly desktop window with:
