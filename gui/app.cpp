@@ -423,7 +423,7 @@ void App::run() {
                     drawAlerts();
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("Gemini AI")) {
+                if (ImGui::BeginTabItem("AI")) {
                     drawGeminiPanel();
                     ImGui::EndTabItem();
                 }
