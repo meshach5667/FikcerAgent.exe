@@ -20,6 +20,8 @@
 #include "actions/auto_healer.h"
 #include "actions/system_fixer.h"
 
+#include <atomic>
+#include <future>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -82,14 +84,18 @@ private:
     // ── UI helpers ─────────────────────────────────────────────────────────
     void drawHealthGauge(const char* label, float value, float warnAt, float critAt);
     void pushLog(LogEntry::Level lvl, const std::string& msg);
+    void launchDeepScan();
+    void launchProcessRefresh();
+    void launchHealIfNeeded();
+    void waitForBackgroundTasks();
 
     // ── Backend callbacks ──────────────────────────────────────────────────
     void onStats(const core::SystemStats& stats);
     void onAnomalies(const std::vector<ai::Anomaly>& anomalies);
 
     // ── Window state ───────────────────────────────────────────────────────
-    GLFWwindow* window_ = nullptr;
-    bool        shutdownRequested_ = false;
+    GLFWwindow*        window_ = nullptr;
+    std::atomic<bool>  shutdownRequested_{false};
 
     // ── Backend modules ────────────────────────────────────────────────────
     core::Monitor              monitor_;
@@ -118,13 +124,21 @@ private:
     std::vector<ai::GeminiProblem> geminiProblems_;
     std::vector<PendingFix>        pendingFixes_;
     core::SystemDiagnostics        lastDiag_{};
-    bool                           deepScanRunning_ = false;
     std::string                    deepScanStatus_  = "Not yet run";
 
     // Security (from last deep scan)
     std::vector<core::SuspiciousProcess> suspiciousProcs_;
     bool firewallEnabled_ = false;
     core::NetworkStatus networkStatus_{};
+
+    // Process activity
+    static constexpr std::size_t MAX_PROCESS_ROWS = 12;
+    static constexpr std::size_t MAX_ACTIVITY_ROWS = 20;
+    std::vector<ai::ProcessResourceInfo> processSnapshot_;
+    std::deque<actions::ProcessInfo>     hungProcessHistory_;
+    std::deque<actions::HealRecord>      healHistory_;
+    std::deque<actions::FixRecord>       fixHistory_;
+    std::deque<std::vector<ai::Anomaly>> pendingHealBatches_;
 
     // Log viewer
     static constexpr std::size_t MAX_LOG_LINES = 200;
@@ -133,6 +147,15 @@ private:
     // Timing
     std::chrono::steady_clock::time_point lastHeuristic_;
     std::chrono::steady_clock::time_point lastDeep_;
+    std::chrono::steady_clock::time_point lastProcessRefresh_;
+
+    // Background tasks
+    std::future<void> deepScanTask_;
+    std::future<void> processRefreshTask_;
+    std::future<void> healTask_;
+    std::atomic<bool> deepScanRunning_{false};
+    std::atomic<bool> processRefreshRunning_{false};
+    std::atomic<bool> healRunning_{false};
 
     // (healer/fixer stats queried directly from the objects)
 };
