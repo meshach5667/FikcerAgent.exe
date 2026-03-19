@@ -100,7 +100,7 @@ public:
         uint64_t memTotal, uint64_t memAvail);
 
 private:
-    // ── Individual scanners ────────────────────────────────────────────────
+    // ── Individual scanners 
     void scanDisks(SystemDiagnostics& d);
     void scanNetwork(SystemDiagnostics& d);
     void scanSuspiciousProcesses(SystemDiagnostics& d);
