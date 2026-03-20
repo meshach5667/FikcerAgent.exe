@@ -1,5 +1,5 @@
 # FikcerAgent – Autonomous Self-Healing System Agent
-
+omoooooo
 > **Cross-platform** · C++20 · macOS (Clang) / Windows (MSVC)
 
 FikcerAgent is a modular, console-based system agent that monitors CPU and
