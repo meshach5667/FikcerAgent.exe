@@ -14,12 +14,14 @@
 #   include <Windows.h>
 #   include <Psapi.h>      // EnumProcesses, GetModuleFileNameExW
 #   include <TlHelp32.h>   // Fallback: CreateToolhelp32Snapshot
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__linux__)
 #   include <cerrno>
 #   include <csignal>
-#   include <libproc.h>
-#   include <sys/sysctl.h>
 #   include <spawn.h>
+#   ifdef __APPLE__
+#       include <libproc.h>
+#       include <sys/sysctl.h>
+#   endif
     extern char** environ;  // POSIX: inherited environment for posix_spawn
 #endif
 

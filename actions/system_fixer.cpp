@@ -2,6 +2,7 @@
 // FikcerAgent – System Fixer Implementation
 // ============================================================================
 #include "actions/system_fixer.h"
+#include "actions/process_manager.h"
 #include "config.h"
 #include "utils/exec.h"
 #include "utils/logger.h"
@@ -252,19 +253,8 @@ FixRecord SystemFixer::killProcess(const ai::GeminiProblem& p) {
     Logger::instance().warn("KILLING suspicious process PID " +
                             std::to_string(pid) + ": " + p.fixDescription);
 
-    // Send SIGTERM first, then SIGKILL.
-#ifdef _WIN32
-    std::string killCmd = "taskkill /PID " + std::to_string(pid) + " /F";
-    int result = system(killCmd.c_str());
-    rec.success = (result == 0);
-#else
-    int result = kill(static_cast<pid_t>(pid), SIGTERM);
-    if (result != 0) {
-        // Try SIGKILL.
-        result = kill(static_cast<pid_t>(pid), SIGKILL);
-    }
-    rec.success = (result == 0);
-#endif
+    // Use ProcessManager's robust and secure termination logic.
+    rec.success = ProcessManager::terminateProcess(pid);
 
     rec.fixApplied = "Killed PID " + std::to_string(pid);
 
