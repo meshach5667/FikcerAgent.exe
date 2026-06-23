@@ -6,6 +6,7 @@
 #include "gui/app.h"
 #include "config.h"
 #include "utils/logger.h"
+#include "utils/notify.h"
 
 #include "vendor/imgui/imgui.h"
 #include "vendor/imgui/backends/imgui_impl_glfw.h"
@@ -318,8 +319,8 @@ void App::run() {
             detector_.feed(latest, procs);
         }
 
-        // ── Background tick: deep scan + Gemini ────────────────────────────
-        if (geminiReady_ && !deepScanRunning_) {
+        // ── Background tick: deep scan (always) + Gemini (if available) ───
+        if (!deepScanRunning_) {
             bool forceDeep = requestDeepScan_.exchange(false);
             auto dElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 now - lastDeep_).count();
@@ -331,50 +332,113 @@ void App::run() {
                     deepScanStatus_ = "Scanning...";
                 }
 
-                // Run deep scan on a tracked async task (not detached)
                 deepScanTask_ = std::async(std::launch::async, [this]() {
                     pushLog(LogEntry::INFO, "Running deep system scan...");
 
+                    // 1. System diagnostics (always runs – no API needed)
                     auto diag   = scanner_.scan();
                     auto latest = monitor_.latestStats();
 
-                    std::string report = core::SystemScanner::generateReport(
-                        diag, latest.cpuUsagePercent, latest.memUsagePercent,
-                        latest.memTotalBytes, latest.memAvailableBytes);
-
-                    auto problems = gemini_.analyseSystem(report);
-
-                    // Prepare status message before locking
-                    bool healthy = problems.empty();
-                    std::string statusMsg = healthy
-                        ? "Healthy \xe2\x80\x93 no issues found"
-                        : std::to_string(problems.size()) + " issue(s) found";
-
-                    // Update shared state under lock – NO pushLog here
+                    // Update diagnostics immediately so Security tab is live
                     {
                         std::lock_guard<std::mutex> lock(mutex_);
-                        lastDiag_ = diag;
-                        geminiProblems_ = problems;
+                        lastDiag_        = diag;
                         suspiciousProcs_ = diag.suspiciousProcesses;
                         firewallEnabled_ = diag.firewallEnabled;
-                        networkStatus_  = diag.network;
+                        networkStatus_   = diag.network;
+                    }
 
+                    // Notify for security threats
+                    if constexpr (config::NOTIFICATIONS_ENABLED) {
+                        if (!diag.suspiciousProcesses.empty()) {
+                            utils::sendNotification("FikcerAgent – Security",
+                                std::to_string(diag.suspiciousProcesses.size()) +
+                                " suspicious process(es) detected!",
+                                "Check the Security tab for details");
+                        }
+                        if (!diag.network.internetReachable) {
+                            utils::sendNotification("FikcerAgent – Network",
+                                "Internet is not reachable.",
+                                "Check your connection");
+                        }
+                    }
+
+                    // 2. Gemini AI analysis (only if API key available)
+                    std::vector<ai::GeminiProblem> problems;
+                    if (geminiReady_) {
+                        std::string report = core::SystemScanner::generateReport(
+                            diag, latest.cpuUsagePercent, latest.memUsagePercent,
+                            latest.memTotalBytes, latest.memAvailableBytes);
+                        problems = gemini_.analyseSystem(report);
+                    }
+
+                    bool healthy = problems.empty();
+                    std::string statusMsg = healthy
+                        ? (geminiReady_ ? "Healthy \xe2\x80\x93 no issues found"
+                                        : "Scan complete (AI offline)")
+                        : std::to_string(problems.size()) + " issue(s) found";
+
+                    // 3. Auto-fix: apply safe fixes automatically
+                    std::vector<std::string> autoFixMessages;
+                    if constexpr (config::AUTO_FIX_ENABLED) {
+                        for (auto& p : problems) {
+                            bool isSafe = (p.severity == "LOW" ||
+                                           p.severity == "MEDIUM") ||
+                                          (p.severity == std::string(config::AUTO_FIX_MAX_SEVERITY));
+                            bool hasAction = (p.fixType == "COMMAND" ||
+                                              p.fixType == "PURGE");
+                            if (isSafe && hasAction) {
+                                auto results = fixer_.fixProblems({p});
+                                bool ok = !results.empty() && results[0].success;
+                                std::string msg = (ok ? "Auto-fixed: " : "Auto-fix failed: ")
+                                                  + p.fixDescription;
+                                autoFixMessages.push_back(msg);
+                            }
+                        }
+                    }
+
+                    // Update shared state under lock
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        geminiProblems_ = problems;
                         pendingFixes_.clear();
                         for (const auto& p : problems) {
                             PendingFix pf;
                             pf.problem = p;
+                            // Mark auto-fixed items
+                            if constexpr (config::AUTO_FIX_ENABLED) {
+                                bool wasSafe = (p.severity == "LOW" ||
+                                                p.severity == "MEDIUM") &&
+                                               (p.fixType == "COMMAND" ||
+                                                p.fixType == "PURGE");
+                                if (wasSafe) {
+                                    pf.approved = true;
+                                    pf.applied  = true;
+                                    pf.succeeded = true;
+                                }
+                            }
                             pendingFixes_.push_back(std::move(pf));
                         }
-
                         deepScanStatus_ = statusMsg;
                     }
 
-                    // Log AFTER releasing lock to avoid recursive mutex
-                    if (healthy) {
-                        pushLog(LogEntry::INFO, "Gemini AI: Everything looks healthy!");
+                    // Log & notify AFTER releasing lock
+                    if (geminiReady_) {
+                        if (healthy) {
+                            pushLog(LogEntry::INFO, "Gemini AI: Everything looks healthy!");
+                        } else {
+                            pushLog(LogEntry::WARN, "Gemini found " +
+                                    std::to_string(problems.size()) + " issue(s)");
+                        }
                     } else {
-                        pushLog(LogEntry::WARN, "Gemini found " +
-                                std::to_string(problems.size()) + " issue(s)");
+                        pushLog(LogEntry::INFO, "System scan complete (AI analysis unavailable).");
+                    }
+
+                    for (const auto& msg : autoFixMessages) {
+                        pushLog(LogEntry::INFO, msg);
+                        if constexpr (config::NOTIFICATIONS_ENABLED) {
+                            utils::sendNotification("FikcerAgent – Auto-Fix", msg);
+                        }
                     }
 
                     deepScanRunning_ = false;
@@ -871,6 +935,24 @@ void App::onAnomalies(const std::vector<ai::Anomaly>& anomalies) {
             alerts_.push_back(a);
         }
         while (alerts_.size() > MAX_ALERTS) alerts_.pop_front();
+    }
+
+    // Send OS notification for HIGH / CRITICAL anomalies
+    if constexpr (config::NOTIFICATIONS_ENABLED) {
+        for (const auto& a : anomalies) {
+            if (a.severity == ai::Severity::HIGH ||
+                a.severity == ai::Severity::CRITICAL) {
+                std::string sev = (a.severity == ai::Severity::CRITICAL)
+                                  ? "CRITICAL" : "HIGH";
+                std::string body;
+                if (!a.relatedProcess.empty())
+                    body = "\"" + a.relatedProcess + "\" – " + a.description;
+                else
+                    body = a.description;
+                utils::sendNotification(
+                    "FikcerAgent \xe2\x80\x93 " + sev + " Alert", body);
+            }
+        }
     }
 
     // Call healer OUTSIDE the lock – its callbacks call pushLog which

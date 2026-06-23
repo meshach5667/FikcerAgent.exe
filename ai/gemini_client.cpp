@@ -113,6 +113,38 @@ std::string GeminiClient::loadApiKey() const {
         }
     }
 
+    // 3. .env file in the working directory.
+    std::filesystem::path envFile = ".env";
+    if (std::filesystem::exists(envFile)) {
+        std::ifstream ifs(envFile);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            line.erase(0, line.find_first_not_of(" \t"));
+            if (line.empty() || line[0] == '#') continue;
+
+            auto eqPos = line.find('=');
+            if (eqPos == std::string::npos) continue;
+
+            std::string key = line.substr(0, eqPos);
+            std::string val = line.substr(eqPos + 1);
+
+            // Strip surrounding quotes (' or ").
+            val.erase(0, val.find_first_not_of(" \t"));
+            val.erase(val.find_last_not_of(" \t\r\n") + 1);
+            if (val.size() >= 2) {
+                if ((val.front() == '\'' && val.back() == '\'') ||
+                    (val.front() == '"'  && val.back() == '"')) {
+                    val = val.substr(1, val.size() - 2);
+                }
+            }
+
+            if (key == "FIKCER_GEMINI_API_KEY" && !val.empty()) {
+                Logger::instance().info("Gemini API key loaded from .env file.");
+                return val;
+            }
+        }
+    }
+
     return "";
 }
 

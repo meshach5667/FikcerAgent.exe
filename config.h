@@ -88,4 +88,17 @@ inline constexpr unsigned int MAX_HEAL_ATTEMPTS_PER_PID = 3;
 /// If true, the agent will only monitor and log — never kill/restart.
 inline constexpr bool DRY_RUN = false;
 
+// ── Auto-Fix ──────────────────────────────────────────────────────────────
+/// Enable automatic application of safe Gemini-recommended fixes.
+inline constexpr bool AUTO_FIX_ENABLED = true;
+
+/// Maximum severity level for auto-fix without user approval.
+/// Fixes at this severity or below are applied automatically.
+/// Options: "LOW", "MEDIUM"  (HIGH and CRITICAL always need user approval)
+inline constexpr std::string_view AUTO_FIX_MAX_SEVERITY = "MEDIUM";
+
+// ── Notifications ─────────────────────────────────────────────────────────
+/// Send native OS notifications for critical issues and applied fixes.
+inline constexpr bool NOTIFICATIONS_ENABLED = true;
+
 } // namespace fikcer::config
