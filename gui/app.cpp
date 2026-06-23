@@ -698,7 +698,7 @@ void App::drawGeminiPanel() {
 
     if (fixesCopy.empty() && !scanRunning) {
         ImGui::TextColored(col::Green,
-            "  No issues found by Gemini AI. All clear!");
+            "  No issues found by AI. All clear!");
         return;
     }
 

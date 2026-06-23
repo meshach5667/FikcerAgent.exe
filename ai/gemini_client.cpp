@@ -42,23 +42,23 @@ bool GeminiClient::init() {
 
     apiKey_ = loadApiKey();
     if (apiKey_.empty()) {
-        lastError_ = "No Gemini API key found. Set FIKCER_GEMINI_API_KEY env "
-                     "var or create ~/.fikcerAgent/gemini_api_key";
+        lastError_ = "No API key found.  "
+                     "Create ~/.fikcerAgent/gemini_api_key";
         available_ = false;
-        Logger::instance().warn("Gemini AI: " + lastError_);
+        Logger::instance().warn("AI: " + lastError_);
         return false;
     }
 
     // Quick validation: key should be non-trivial.
     if (apiKey_.size() < 10) {
-        lastError_ = "Gemini API key looks invalid (too short).";
+        lastError_ = "API key looks invalid (too short).";
         available_ = false;
-        Logger::instance().warn("Gemini AI: " + lastError_);
+        Logger::instance().warn("AI: " + lastError_);
         return false;
     }
 
     available_ = true;
-    Logger::instance().info("Gemini AI initialised with model: " + model_);
+    Logger::instance().info("AI initialised with model: " + model_);
     return true;
 }
 
@@ -81,7 +81,7 @@ std::string GeminiClient::loadApiKey() const {
     // 1. Environment variable.
     const char* envKey = std::getenv("FIKCER_GEMINI_API_KEY");
     if (envKey && std::strlen(envKey) > 0) {
-        Logger::instance().info("Gemini API key loaded from environment variable.");
+        Logger::instance().info(" API key loaded from environment variable.");
         return std::string(envKey);
     }
 
@@ -106,7 +106,7 @@ std::string GeminiClient::loadApiKey() const {
                 key.erase(key.find_last_not_of(" \t\r\n") + 1);
                 if (!key.empty()) {
                     Logger::instance().info(
-                        "Gemini API key loaded from " + keyFile.string());
+                        " API key loaded from " + keyFile.string());
                     return key;
                 }
             }
@@ -290,7 +290,7 @@ std::string GeminiClient::httpPost(const std::string& url,
 
 std::string GeminiClient::ask(const std::string& prompt) {
     if (!available_) {
-        lastError_ = "Gemini client not initialised.";
+        lastError_ = "AI client not initialised.";
         return "";
     }
 
@@ -306,7 +306,7 @@ std::string GeminiClient::ask(const std::string& prompt) {
     std::string text = extractTextFromResponse(response);
     if (text.empty()) {
         lastError_ = "Failed to parse Gemini response.";
-        Logger::instance().warn("Gemini: empty text in response.");
+        Logger::instance().warn("AI: empty text in response.");
     }
 
     return text;
@@ -348,15 +348,15 @@ std::vector<GeminiProblem> GeminiClient::analyseSystem(
         "COMMAND|sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder|"
         "Flush DNS cache\n";
 
-    Logger::instance().info("Sending system report to Gemini for analysis...");
+    Logger::instance().info("Sending system report to AI for analysis...");
 
     std::string response = ask(prompt);
     if (response.empty()) {
-        Logger::instance().warn("Gemini returned empty response.");
+        Logger::instance().warn("AI returned empty response.");
         return {};
     }
 
-    Logger::instance().debug("Gemini response: " + response.substr(0, 200));
+    Logger::instance().debug("AI response: " + response.substr(0, 200));
 
     return parseProblems(response);
 }
@@ -369,7 +369,7 @@ std::vector<GeminiProblem> GeminiClient::parseProblems(
     std::vector<GeminiProblem> problems;
 
     if (text.find("NO_PROBLEMS_DETECTED") != std::string::npos) {
-        Logger::instance().info("Gemini: No problems detected. System healthy.");
+        Logger::instance().info("AI: No problems detected. System healthy.");
         return problems;
     }
 
