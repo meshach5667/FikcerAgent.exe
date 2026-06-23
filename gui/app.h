@@ -1,4 +1,3 @@
-/
 // FikcerAgent – Dear ImGui Desktop GUI Application
 
 // Renders a user-friendly desktop window with:
@@ -156,6 +155,7 @@ private:
     std::atomic<bool> deepScanRunning_{false};
     std::atomic<bool> processRefreshRunning_{false};
     std::atomic<bool> healRunning_{false};
+    std::atomic<bool> requestDeepScan_{false};
 
     // (healer/fixer stats queried directly from the objects)
 };

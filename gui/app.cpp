@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <future>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -319,15 +320,19 @@ void App::run() {
 
         // ── Background tick: deep scan + Gemini ────────────────────────────
         if (geminiReady_ && !deepScanRunning_) {
+            bool forceDeep = requestDeepScan_.exchange(false);
             auto dElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 now - lastDeep_).count();
-            if (dElapsed >= config::DEEP_SCAN_INTERVAL_MS) {
+            if (forceDeep || dElapsed >= config::DEEP_SCAN_INTERVAL_MS) {
                 lastDeep_ = now;
                 deepScanRunning_ = true;
-                deepScanStatus_ = "Scanning...";
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    deepScanStatus_ = "Scanning...";
+                }
 
-                // Run deep scan on a worker thread to avoid freezing UI
-                std::thread([this]() {
+                // Run deep scan on a tracked async task (not detached)
+                deepScanTask_ = std::async(std::launch::async, [this]() {
                     pushLog(LogEntry::INFO, "Running deep system scan...");
 
                     auto diag   = scanner_.scan();
@@ -339,6 +344,13 @@ void App::run() {
 
                     auto problems = gemini_.analyseSystem(report);
 
+                    // Prepare status message before locking
+                    bool healthy = problems.empty();
+                    std::string statusMsg = healthy
+                        ? "Healthy \xe2\x80\x93 no issues found"
+                        : std::to_string(problems.size()) + " issue(s) found";
+
+                    // Update shared state under lock – NO pushLog here
                     {
                         std::lock_guard<std::mutex> lock(mutex_);
                         lastDiag_ = diag;
@@ -347,7 +359,6 @@ void App::run() {
                         firewallEnabled_ = diag.firewallEnabled;
                         networkStatus_  = diag.network;
 
-                        // Build pending fixes
                         pendingFixes_.clear();
                         for (const auto& p : problems) {
                             PendingFix pf;
@@ -355,18 +366,19 @@ void App::run() {
                             pendingFixes_.push_back(std::move(pf));
                         }
 
-                        deepScanRunning_ = false;
-                        if (problems.empty()) {
-                            deepScanStatus_ = "Healthy – no issues found";
-                            pushLog(LogEntry::INFO, "Gemini AI: Everything looks healthy!");
-                        } else {
-                            deepScanStatus_ = std::to_string(problems.size()) +
-                                              " issue(s) found";
-                            pushLog(LogEntry::WARN, "Gemini found " +
-                                    std::to_string(problems.size()) + " issue(s)");
-                        }
+                        deepScanStatus_ = statusMsg;
                     }
-                }).detach();
+
+                    // Log AFTER releasing lock to avoid recursive mutex
+                    if (healthy) {
+                        pushLog(LogEntry::INFO, "Gemini AI: Everything looks healthy!");
+                    } else {
+                        pushLog(LogEntry::WARN, "Gemini found " +
+                                std::to_string(problems.size()) + " issue(s)");
+                    }
+
+                    deepScanRunning_ = false;
+                });
             }
         }
 
@@ -444,8 +456,11 @@ void App::run() {
         render();
     }
 
-    // Shutdown
+    // Shutdown – wait for background tasks before stopping modules
     pushLog(LogEntry::INFO, "FikcerAgent shutting down...");
+    if (deepScanTask_.valid()) {
+        deepScanTask_.wait();
+    }
     procMgr_.stop();
     monitor_.stop();
     utils::Logger::instance().shutdown();
@@ -590,36 +605,46 @@ void App::drawGeminiPanel() {
         return;
     }
 
-    // Status line
+    // Copy shared state under the lock to avoid data races
+    bool scanRunning = deepScanRunning_.load();
+    std::string scanStatus;
+    std::vector<PendingFix> fixesCopy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        scanStatus = deepScanStatus_;
+        fixesCopy  = pendingFixes_;
+    }
+
+    // Status line (drawn with local copies – no lock needed)
     ImGui::TextColored(col::Cyan, "Deep Scan Status:");
     ImGui::SameLine();
-    if (deepScanRunning_) {
-        ImGui::TextColored(col::Yellow, "%s", deepScanStatus_.c_str());
+    if (scanRunning) {
+        ImGui::TextColored(col::Yellow, "%s", scanStatus.c_str());
     } else {
-        ImGui::Text("%s", deepScanStatus_.c_str());
+        ImGui::Text("%s", scanStatus.c_str());
     }
 
     ImGui::SameLine(ImGui::GetWindowWidth() - 220);
-    if (ImGui::Button("Run Deep Scan Now") && !deepScanRunning_) {
-        // Force immediate deep scan
-        lastDeep_ = std::chrono::steady_clock::now()
-                    - std::chrono::milliseconds(config::DEEP_SCAN_INTERVAL_MS + 1000);
+    if (ImGui::Button("Run Deep Scan Now") && !scanRunning) {
+        requestDeepScan_ = true;
     }
 
     ImGui::Separator();
     ImGui::Spacing();
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    if (pendingFixes_.empty() && !deepScanRunning_) {
+    if (fixesCopy.empty() && !scanRunning) {
         ImGui::TextColored(col::Green,
             "  No issues found by Gemini AI. All clear!");
         return;
     }
 
+    // Track which button was pressed (process actions after drawing)
+    int applyIdx = -1;
+    int skipIdx  = -1;
+
     // Show each problem with approve/deny buttons
-    for (size_t i = 0; i < pendingFixes_.size(); ++i) {
-        auto& pf = pendingFixes_[i];
+    for (size_t i = 0; i < fixesCopy.size(); ++i) {
+        auto& pf = fixesCopy[i];
         ImGui::PushID(static_cast<int>(i));
 
         ImVec4 c = gemColor(pf.problem.severity);
@@ -635,29 +660,17 @@ void App::drawGeminiPanel() {
 
             if (!pf.applied && !pf.denied) {
                 if (ImGui::Button("Apply Fix")) {
-                    pf.approved = true;
-                    pf.applied = true;
-
-                    // Execute the fix
-                    std::vector<ai::GeminiProblem> single = {pf.problem};
-                    auto results = fixer_.fixProblems(single);
-                    pf.succeeded = !results.empty() && results[0].success;
-
-                    if (pf.succeeded)
-                        pushLog(LogEntry::INFO, "Fix applied: " + pf.problem.fixDescription);
-                    else
-                        pushLog(LogEntry::WARN, "Fix failed: " + pf.problem.fixDescription);
+                    applyIdx = static_cast<int>(i);
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Skip")) {
-                    pf.denied = true;
-                    pushLog(LogEntry::INFO, "Fix skipped: " + pf.problem.fixDescription);
+                    skipIdx = static_cast<int>(i);
                 }
             } else if (pf.applied) {
                 if (pf.succeeded)
                     ImGui::TextColored(col::Green, "  Applied successfully!");
                 else
-                    ImGui::TextColored(col::Red, "  Fix failed — may need admin permissions.");
+                    ImGui::TextColored(col::Red, "  Fix failed \xe2\x80\x94 may need admin permissions.");
             } else if (pf.denied) {
                 ImGui::TextColored(col::Dim, "  Skipped by user.");
             }
@@ -665,6 +678,33 @@ void App::drawGeminiPanel() {
 
         ImGui::Separator();
         ImGui::PopID();
+    }
+
+    // Process button actions OUTSIDE the lock (fixer callbacks call pushLog)
+    if (applyIdx >= 0) {
+        auto& pf = fixesCopy[static_cast<size_t>(applyIdx)];
+        pf.approved = true;
+        pf.applied  = true;
+
+        std::vector<ai::GeminiProblem> single = {pf.problem};
+        auto results = fixer_.fixProblems(single);
+        pf.succeeded = !results.empty() && results[0].success;
+
+        if (pf.succeeded)
+            pushLog(LogEntry::INFO, "Fix applied: " + pf.problem.fixDescription);
+        else
+            pushLog(LogEntry::WARN, "Fix failed: " + pf.problem.fixDescription);
+    }
+    if (skipIdx >= 0) {
+        fixesCopy[static_cast<size_t>(skipIdx)].denied = true;
+        pushLog(LogEntry::INFO, "Fix skipped: " +
+                fixesCopy[static_cast<size_t>(skipIdx)].problem.fixDescription);
+    }
+
+    // Write back modified state
+    if (applyIdx >= 0 || skipIdx >= 0) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pendingFixes_ = std::move(fixesCopy);
     }
 }
 
@@ -824,18 +864,27 @@ void App::onStats(const core::SystemStats& stats) {
 }
 
 void App::onAnomalies(const std::vector<ai::Anomaly>& anomalies) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& a : anomalies) {
-        alerts_.push_back(a);
+    // Store alerts under lock
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& a : anomalies) {
+            alerts_.push_back(a);
+        }
+        while (alerts_.size() > MAX_ALERTS) alerts_.pop_front();
     }
-    while (alerts_.size() > MAX_ALERTS) alerts_.pop_front();
 
-    // Let healer act (outside the lock is better but fine for MVP)
+    // Call healer OUTSIDE the lock – its callbacks call pushLog which
+    // needs mutex_, so holding it here would cause a recursive deadlock.
     auto records = healer_.handleAnomalies(anomalies);
-    for (const auto& r : records) {
-        if (r.action != actions::HealAction::LOG_ONLY &&
-            r.action != actions::HealAction::NONE) {
-            logLines_.push_back({LogEntry::INFO, "Auto-fix: " + r.description});
+
+    // Store heal results back under the lock
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& r : records) {
+            if (r.action != actions::HealAction::LOG_ONLY &&
+                r.action != actions::HealAction::NONE) {
+                logLines_.push_back({LogEntry::INFO, "Auto-fix: " + r.description});
+            }
         }
     }
 }
