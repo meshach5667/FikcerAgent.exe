@@ -49,6 +49,17 @@ set(SOURCES
     ai/anomaly_detector.cpp
     ai/gemini_client.cpp
     utils/logger.cpp
+    # Agent v2.0 — Autonomous AI subsystems
+    agent/agent.cpp
+    agent/goal_manager.cpp
+    agent/world_state.cpp
+    agent/memory_store.cpp
+    agent/tool_registry.cpp
+    agent/ai_planner.cpp
+    agent/impact_classifier.cpp
+    agent/reflection_engine.cpp
+    agent/learning_engine.cpp
+    agent/health_score.cpp
 )
 
 set(HEADERS
@@ -63,6 +74,17 @@ set(HEADERS
     ai/gemini_client.h
     utils/logger.h
     utils/exec.h
+    # Agent v2.0 — Autonomous AI subsystems
+    agent/agent.h
+    agent/goal_manager.h
+    agent/world_state.h
+    agent/memory_store.h
+    agent/tool_registry.h
+    agent/ai_planner.h
+    agent/impact_classifier.h
+    agent/reflection_engine.h
+    agent/learning_engine.h
+    agent/health_score.h
 )
 
 # ── Executable ──────────────────────────────────────────────────────────────
@@ -110,6 +132,28 @@ endif()
 find_package(CURL REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${CURL_LIBRARIES})
+
+# ── SQLite3 (Agent persistent memory) ──────────────────────────────────────
+if(APPLE)
+    find_library(SQLITE3_LIBRARY sqlite3)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${SQLITE3_LIBRARY})
+elseif(WIN32)
+    # Windows: use bundled sqlite3 amalgamation or vcpkg
+    find_package(unofficial-sqlite3 CONFIG QUIET)
+    if(unofficial-sqlite3_FOUND)
+        target_link_libraries(${PROJECT_NAME} PRIVATE unofficial::sqlite3::sqlite3)
+    else()
+        find_library(SQLITE3_LIBRARY sqlite3)
+        if(SQLITE3_LIBRARY)
+            target_link_libraries(${PROJECT_NAME} PRIVATE ${SQLITE3_LIBRARY})
+        else()
+            message(WARNING "SQLite3 not found — agent memory will be disabled")
+        endif()
+    endif()
+else()
+    find_package(SQLite3 REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SQLite::SQLite3)
+endif()
 
 # ── Suppress warnings in Dear ImGui vendor code ────────────────────────────
 if(NOT MSVC)

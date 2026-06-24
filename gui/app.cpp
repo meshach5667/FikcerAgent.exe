@@ -150,67 +150,40 @@ bool App::init() {
     if (!initWindow()) return false;
     initImGui();
 
-    // Monitor
-    monitor_.setCallback([this](const core::SystemStats& s) { onStats(s); });
-    if (!monitor_.start(config::MONITOR_INTERVAL_MS)) {
-        pushLog(LogEntry::ERR, "Could not start health monitor");
+    // Setup Agent callback
+    agent_.setEventCallback([this](const agent::AgentEvent& ev) {
+        auto lvl = LogEntry::INFO;
+        if (ev.severity == "warn") lvl = LogEntry::WARN;
+        else if (ev.severity == "error" || ev.severity == "critical") lvl = LogEntry::ERR;
+        
+        // Push to standard log
+        pushLog(lvl, ev.message);
+        
+        // If it's a critical alert or approval, we can also store it in alerts_ queue
+        if (ev.type == agent::AgentEvent::ALERT || ev.type == agent::AgentEvent::APPROVAL_NEEDED) {
+            std::lock_guard lock(mutex_);
+            ai::Anomaly a;
+            a.description = ev.message;
+            if (ev.severity == "critical") a.severity = ai::Severity::CRITICAL;
+            else if (ev.severity == "error") a.severity = ai::Severity::HIGH;
+            else a.severity = ai::Severity::MEDIUM;
+            
+            alerts_.push_front(a);
+            if (alerts_.size() > MAX_ALERTS) alerts_.pop_back();
+        }
+    });
+
+    if (!agent_.init()) {
+        pushLog(LogEntry::ERR, "Failed to initialise Agent orchestrator");
         return false;
     }
-    pushLog(LogEntry::INFO, "Health monitor started");
-
-    // Process manager
-#ifdef _WIN32
-    procMgr_.addToWhitelist("notepad.exe");
-    procMgr_.addToWhitelist("explorer.exe");
-    procMgr_.addToWhitelist("calc.exe");
-#elif defined(__APPLE__)
-    procMgr_.addToWhitelist("TextEdit");
-    procMgr_.addToWhitelist("Calculator");
-    procMgr_.addToWhitelist("Notes");
-#endif
-    procMgr_.setHungCallback([this](const actions::ProcessInfo& info) {
-        pushLog(LogEntry::WARN, "\"" + info.name + "\" appears frozen");
-    });
-    if (!procMgr_.start(config::PROCESS_SCAN_INTERVAL_MS)) {
-        pushLog(LogEntry::ERR, "Could not start process manager");
-        monitor_.stop();
+    
+    if (!agent_.start()) {
+        pushLog(LogEntry::ERR, "Failed to start Agent loop");
         return false;
     }
-    pushLog(LogEntry::INFO, "Process manager started");
-
-    // Anomaly detector
-    detector_.setCallback([this](const std::vector<ai::Anomaly>& a) { onAnomalies(a); });
-
-    healer_.setCallback([this](const actions::HealRecord& rec) {
-        auto lvl = rec.success ? LogEntry::INFO : LogEntry::WARN;
-        pushLog(lvl, "Heal: " + rec.description +
-                     (rec.success ? " (ok)" : " (failed)"));
-    });
-
-    // Gemini
-    geminiReady_ = gemini_.init();
-    if (geminiReady_) {
-        pushLog(LogEntry::INFO,
-                "Gemini AI connected (model: " + gemini_.modelName() + ")");
-    } else {
-        pushLog(LogEntry::WARN,
-                "Gemini AI not available — using local detection only.");
-    }
-
-    // System fixer
-    fixer_.setCallback([this](const actions::FixRecord& rec) {
-        auto lvl = rec.success ? LogEntry::INFO : LogEntry::WARN;
-        pushLog(lvl, "Fix [" + rec.problemType + "]: " + rec.fixApplied +
-                     (rec.success ? " (ok)" : " (failed)"));
-    });
 
     pushLog(LogEntry::INFO, "All modules ready. Protecting your computer!");
-
-    // Timing – schedule first deep scan after 10 s
-    lastHeuristic_ = std::chrono::steady_clock::now();
-    lastDeep_ = std::chrono::steady_clock::now()
-                - std::chrono::milliseconds(config::DEEP_SCAN_INTERVAL_MS - 10000);
-
     return true;
 }
 
@@ -308,144 +281,6 @@ void App::run() {
     while (!glfwWindowShouldClose(window_) && !shutdownRequested_) {
         newFrame();
 
-        // ── Background tick: heuristic ─────────────────────────────────────
-        auto now = std::chrono::steady_clock::now();
-        auto hElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now - lastHeuristic_).count();
-        if (hElapsed >= config::AI_SCAN_INTERVAL_MS) {
-            lastHeuristic_ = now;
-            auto procs  = ai::AnomalyDetector::sampleProcessResources();
-            auto latest = monitor_.latestStats();
-            detector_.feed(latest, procs);
-        }
-
-        // ── Background tick: deep scan (always) + Gemini (if available) ───
-        if (!deepScanRunning_) {
-            bool forceDeep = requestDeepScan_.exchange(false);
-            auto dElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                now - lastDeep_).count();
-            if (forceDeep || dElapsed >= config::DEEP_SCAN_INTERVAL_MS) {
-                lastDeep_ = now;
-                deepScanRunning_ = true;
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    deepScanStatus_ = "Scanning...";
-                }
-
-                deepScanTask_ = std::async(std::launch::async, [this]() {
-                    pushLog(LogEntry::INFO, "Running deep system scan...");
-
-                    // 1. System diagnostics (always runs – no API needed)
-                    auto diag   = scanner_.scan();
-                    auto latest = monitor_.latestStats();
-
-                    // Update diagnostics immediately so Security tab is live
-                    {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        lastDiag_        = diag;
-                        suspiciousProcs_ = diag.suspiciousProcesses;
-                        firewallEnabled_ = diag.firewallEnabled;
-                        networkStatus_   = diag.network;
-                    }
-
-                    // Notify for security threats
-                    if constexpr (config::NOTIFICATIONS_ENABLED) {
-                        if (!diag.suspiciousProcesses.empty()) {
-                            utils::sendNotification("FikcerAgent – Security",
-                                std::to_string(diag.suspiciousProcesses.size()) +
-                                " suspicious process(es) detected!",
-                                "Check the Security tab for details");
-                        }
-                        if (!diag.network.internetReachable) {
-                            utils::sendNotification("FikcerAgent – Network",
-                                "Internet is not reachable.",
-                                "Check your connection");
-                        }
-                    }
-
-                    // 2. Gemini AI analysis (only if API key available)
-                    std::vector<ai::GeminiProblem> problems;
-                    if (geminiReady_) {
-                        std::string report = core::SystemScanner::generateReport(
-                            diag, latest.cpuUsagePercent, latest.memUsagePercent,
-                            latest.memTotalBytes, latest.memAvailableBytes);
-                        problems = gemini_.analyseSystem(report);
-                    }
-
-                    bool healthy = problems.empty();
-                    std::string statusMsg = healthy
-                        ? (geminiReady_ ? "Healthy \xe2\x80\x93 no issues found"
-                                        : "Scan complete (AI offline)")
-                        : std::to_string(problems.size()) + " issue(s) found";
-
-                    // 3. Auto-fix: apply safe fixes automatically
-                    std::vector<std::string> autoFixMessages;
-                    if constexpr (config::AUTO_FIX_ENABLED) {
-                        for (auto& p : problems) {
-                            bool isSafe = (p.severity == "LOW" ||
-                                           p.severity == "MEDIUM") ||
-                                          (p.severity == std::string(config::AUTO_FIX_MAX_SEVERITY));
-                            bool hasAction = (p.fixType == "COMMAND" ||
-                                              p.fixType == "PURGE");
-                            if (isSafe && hasAction) {
-                                auto results = fixer_.fixProblems({p});
-                                bool ok = !results.empty() && results[0].success;
-                                std::string msg = (ok ? "Auto-fixed: " : "Auto-fix failed: ")
-                                                  + p.fixDescription;
-                                autoFixMessages.push_back(msg);
-                            }
-                        }
-                    }
-
-                    // Update shared state under lock
-                    {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        geminiProblems_ = problems;
-                        pendingFixes_.clear();
-                        for (const auto& p : problems) {
-                            PendingFix pf;
-                            pf.problem = p;
-                            // Mark auto-fixed items
-                            if constexpr (config::AUTO_FIX_ENABLED) {
-                                bool wasSafe = (p.severity == "LOW" ||
-                                                p.severity == "MEDIUM") &&
-                                               (p.fixType == "COMMAND" ||
-                                                p.fixType == "PURGE");
-                                if (wasSafe) {
-                                    pf.approved = true;
-                                    pf.applied  = true;
-                                    pf.succeeded = true;
-                                }
-                            }
-                            pendingFixes_.push_back(std::move(pf));
-                        }
-                        deepScanStatus_ = statusMsg;
-                    }
-
-                    // Log & notify AFTER releasing lock
-                    if (geminiReady_) {
-                        if (healthy) {
-                            pushLog(LogEntry::INFO, "Gemini AI: Everything looks healthy!");
-                        } else {
-                            pushLog(LogEntry::WARN, "Gemini found " +
-                                    std::to_string(problems.size()) + " issue(s)");
-                        }
-                    } else {
-                        pushLog(LogEntry::INFO, "System scan complete (AI analysis unavailable).");
-                    }
-
-                    for (const auto& msg : autoFixMessages) {
-                        pushLog(LogEntry::INFO, msg);
-                        if constexpr (config::NOTIFICATIONS_ENABLED) {
-                            utils::sendNotification("FikcerAgent – Auto-Fix", msg);
-                        }
-                    }
-
-                    deepScanRunning_ = false;
-                });
-            }
-        }
-
         // ── Full-window ImGui layout ───────────────────────────────────────
         {
             const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -471,21 +306,15 @@ void App::run() {
             ImGui::SameLine(ImGui::GetWindowWidth() - 200);
 
             // Overall health indicator
-            float cpu, mem;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                cpu = static_cast<float>(latestStats_.cpuUsagePercent);
-                mem = static_cast<float>(latestStats_.memUsagePercent);
-            }
-            float worst = std::max(cpu, mem);
-            if (worst < 50.0f)
-                ImGui::TextColored(col::Green,   "Status: Healthy");
-            else if (worst < 75.0f)
-                ImGui::TextColored(col::Yellow,  "Status: Moderate");
-            else if (worst < 90.0f)
-                ImGui::TextColored(col::Orange,  "Status: Elevated");
+            float healthScore = static_cast<float>(agent_.healthScore());
+            if (healthScore >= 90.0f)
+                ImGui::TextColored(col::Green,   "Status: Healthy (%.1f)", healthScore);
+            else if (healthScore >= 75.0f)
+                ImGui::TextColored(col::Yellow,  "Status: Moderate (%.1f)", healthScore);
+            else if (healthScore >= 50.0f)
+                ImGui::TextColored(col::Orange,  "Status: Elevated (%.1f)", healthScore);
             else
-                ImGui::TextColored(col::Red,     "Status: Critical!");
+                ImGui::TextColored(col::Red,     "Status: Critical! (%.1f)", healthScore);
 
             ImGui::Separator();
 
@@ -520,13 +349,9 @@ void App::run() {
         render();
     }
 
-    // Shutdown – wait for background tasks before stopping modules
+    // Shutdown
     pushLog(LogEntry::INFO, "FikcerAgent shutting down...");
-    if (deepScanTask_.valid()) {
-        deepScanTask_.wait();
-    }
-    procMgr_.stop();
-    monitor_.stop();
+    agent_.stop();
     utils::Logger::instance().shutdown();
 }
 
@@ -538,12 +363,26 @@ void App::requestShutdown() {
 // Dashboard tab
 // ============================================================================
 void App::drawDashboard() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    auto ws = agent_.worldState();
+    
+    float cpu = 0.0f;
+    float mem = 0.0f;
+    if (ws.metrics.find("cpu_usage_percent") != ws.metrics.end()) {
+        cpu = static_cast<float>(ws.metrics.at("cpu_usage_percent"));
+    }
+    if (ws.metrics.find("mem_usage_percent") != ws.metrics.end()) {
+        mem = static_cast<float>(ws.metrics.at("mem_usage_percent"));
+    }
 
-    float cpu  = static_cast<float>(latestStats_.cpuUsagePercent);
-    float mem  = static_cast<float>(latestStats_.memUsagePercent);
-    uint64_t memTotal = latestStats_.memTotalBytes;
-    uint64_t memAvail = latestStats_.memAvailableBytes;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Update history graphs
+        cpuHistory_.push_back(cpu);
+        if (cpuHistory_.size() > MAX_GRAPH_SAMPLES) cpuHistory_.pop_front();
+        
+        memHistory_.push_back(mem);
+        if (memHistory_.size() > MAX_GRAPH_SAMPLES) memHistory_.pop_front();
+    }
 
     ImGui::Spacing();
 
@@ -558,10 +397,7 @@ void App::drawDashboard() {
     drawHealthGauge("Memory (RAM)", mem / 100.0f, 0.50f, 0.90f);
     ImGui::SameLine();
     char memLabel[128];
-    std::snprintf(memLabel, sizeof(memLabel), "%.1f%%  (%s used of %s)",
-                  mem,
-                  fmtBytes(memTotal - memAvail).c_str(),
-                  fmtBytes(memTotal).c_str());
+    std::snprintf(memLabel, sizeof(memLabel), "%.1f%%", mem);
     ImGui::Text("%s", memLabel);
 
     ImGui::Spacing();
@@ -570,24 +406,30 @@ void App::drawDashboard() {
 
     // ── History graphs ─────────────────────────────────────────────────────
     ImGui::Text("CPU History");
-    if (!cpuHistory_.empty()) {
-        std::vector<float> cpuVec(cpuHistory_.begin(), cpuHistory_.end());
-        ImGui::PlotLines("##cpuGraph", cpuVec.data(),
-                         static_cast<int>(cpuVec.size()),
-                         0, nullptr, 0.0f, 100.0f, ImVec2(-1, 80));
-    } else {
-        ImGui::TextColored(col::Dim, "Collecting data...");
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!cpuHistory_.empty()) {
+            std::vector<float> cpuVec(cpuHistory_.begin(), cpuHistory_.end());
+            ImGui::PlotLines("##cpuGraph", cpuVec.data(),
+                             static_cast<int>(cpuVec.size()),
+                             0, nullptr, 0.0f, 100.0f, ImVec2(-1, 80));
+        } else {
+            ImGui::TextColored(col::Dim, "Collecting data...");
+        }
     }
 
     ImGui::Spacing();
     ImGui::Text("Memory History");
-    if (!memHistory_.empty()) {
-        std::vector<float> memVec(memHistory_.begin(), memHistory_.end());
-        ImGui::PlotLines("##memGraph", memVec.data(),
-                         static_cast<int>(memVec.size()),
-                         0, nullptr, 0.0f, 100.0f, ImVec2(-1, 80));
-    } else {
-        ImGui::TextColored(col::Dim, "Collecting data...");
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!memHistory_.empty()) {
+            std::vector<float> memVec(memHistory_.begin(), memHistory_.end());
+            ImGui::PlotLines("##memGraph", memVec.data(),
+                             static_cast<int>(memVec.size()),
+                             0, nullptr, 0.0f, 100.0f, ImVec2(-1, 80));
+        } else {
+            ImGui::TextColored(col::Dim, "Collecting data...");
+        }
     }
 
     ImGui::Spacing();
@@ -596,19 +438,27 @@ void App::drawDashboard() {
 
     // ── Quick stats ────────────────────────────────────────────────────────
     ImGui::Columns(3, "##statsCol", false);
-    ImGui::TextColored(col::Cyan, "Processes Healed");
-    ImGui::Text("%llu terminated, %llu restarted",
-                static_cast<unsigned long long>(healer_.totalTerminations()),
-                static_cast<unsigned long long>(healer_.totalRestarts()));
+    
+    // Show Goals
+    auto goals = agent_.goals();
+    int metGoals = 0;
+    for (const auto& g : goals) {
+        if (g.isMet) metGoals++;
+    }
+    
+    ImGui::TextColored(col::Cyan, "Goals Met");
+    ImGui::Text("%d / %d", metGoals, static_cast<int>(goals.size()));
+    
     ImGui::NextColumn();
-    ImGui::TextColored(col::Cyan, "Memory Cleanups");
-    ImGui::Text("%llu",
-                static_cast<unsigned long long>(healer_.totalPurgeCaches()));
+    
+    ImGui::TextColored(col::Cyan, "Pending Approvals");
+    ImGui::Text("%d", static_cast<int>(agent_.pendingApprovals().size()));
+    
     ImGui::NextColumn();
-    ImGui::TextColored(col::Cyan, "Fixes Applied");
-    ImGui::Text("%llu applied, %llu failed",
-                static_cast<unsigned long long>(fixer_.totalFixesApplied()),
-                static_cast<unsigned long long>(fixer_.totalFixesFailed()));
+    
+    ImGui::TextColored(col::Cyan, "Total Actions");
+    ImGui::Text("%llu", static_cast<unsigned long long>(agent_.memory().getAllActionStats().size()));
+    
     ImGui::Columns(1);
 }
 
@@ -662,113 +512,89 @@ void App::drawAlerts() {
 void App::drawGeminiPanel() {
     ImGui::Spacing();
 
-    if (!geminiReady_) {
+    if (!agent_.geminiReady()) {
         ImGui::TextColored(col::Yellow,
             "Gemini AI is not available. Set the FIKCER_GEMINI_API_KEY "
             "environment variable to enable.");
         return;
     }
 
-    // Copy shared state under the lock to avoid data races
-    bool scanRunning = deepScanRunning_.load();
-    std::string scanStatus;
-    std::vector<PendingFix> fixesCopy;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        scanStatus = deepScanStatus_;
-        fixesCopy  = pendingFixes_;
-    }
+    auto approvals = agent_.pendingApprovals();
 
-    // Status line (drawn with local copies – no lock needed)
-    ImGui::TextColored(col::Cyan, "Deep Scan Status:");
+    // Status line
+    ImGui::TextColored(col::Cyan, "Agent Autonomous Status:");
     ImGui::SameLine();
-    if (scanRunning) {
-        ImGui::TextColored(col::Yellow, "%s", scanStatus.c_str());
-    } else {
-        ImGui::Text("%s", scanStatus.c_str());
-    }
-
-    ImGui::SameLine(ImGui::GetWindowWidth() - 220);
-    if (ImGui::Button("Run Deep Scan Now") && !scanRunning) {
-        requestDeepScan_ = true;
-    }
+    ImGui::TextColored(col::Green, "Active");
 
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (fixesCopy.empty() && !scanRunning) {
-        ImGui::TextColored(col::Green,
-            "  No issues found by AI. All clear!");
+    if (approvals.empty()) {
+        ImGui::TextColored(col::Green, "  No pending approvals. AI has not suggested any restricted actions.");
+        
+        // Show recent plans briefly
+        auto recent = agent_.recentPlans();
+        if (!recent.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(col::Dim, "Recent AI Plans:");
+            for (const auto& plan : recent) {
+                ImGui::BulletText("%s (Score: %d)", plan.recommendedAction.c_str(), plan.confidenceScore);
+            }
+        }
         return;
     }
 
-    // Track which button was pressed (process actions after drawing)
+    // Track which button was pressed
     int applyIdx = -1;
     int skipIdx  = -1;
 
     // Show each problem with approve/deny buttons
-    for (size_t i = 0; i < fixesCopy.size(); ++i) {
-        auto& pf = fixesCopy[i];
-        ImGui::PushID(static_cast<int>(i));
+    for (size_t i = 0; i < approvals.size(); ++i) {
+        auto& req = approvals[i];
+        ImGui::PushID(req.id);
 
-        ImVec4 c = gemColor(pf.problem.severity);
-        ImGui::TextColored(c, "[%s]", pf.problem.severity.c_str());
+        ImVec4 c = col::Yellow;
+        if (req.impact.risk == agent::RiskLevel::HIGH) c = col::Red;
+        else if (req.impact.risk == agent::RiskLevel::CRITICAL) c = col::Magenta;
+
+        ImGui::TextColored(c, "[%s RISK]", req.impact.impactDescription.c_str());
         ImGui::SameLine();
-        ImGui::TextColored(col::White, "%s",
-                           friendlyType(pf.problem.type).c_str());
-        ImGui::TextWrapped("  %s", pf.problem.description.c_str());
+        ImGui::TextColored(col::White, "Action: %s", req.plan.recommendedAction.c_str());
+        ImGui::TextWrapped("  Goal: %s", req.plan.targetGoal.c_str());
+        ImGui::TextWrapped("  Reasoning: %s", req.plan.reasoning.c_str());
 
-        if (pf.problem.fixType != "NONE" && !pf.problem.fixDescription.empty()) {
-            ImGui::TextColored(col::Cyan, "  Suggested fix: %s",
-                               pf.problem.fixDescription.c_str());
-
-            if (!pf.applied && !pf.denied) {
-                if (ImGui::Button("Apply Fix")) {
-                    applyIdx = static_cast<int>(i);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Skip")) {
-                    skipIdx = static_cast<int>(i);
-                }
-            } else if (pf.applied) {
-                if (pf.succeeded)
-                    ImGui::TextColored(col::Green, "  Applied successfully!");
-                else
-                    ImGui::TextColored(col::Red, "  Fix failed \xe2\x80\x94 may need admin permissions.");
-            } else if (pf.denied) {
-                ImGui::TextColored(col::Dim, "  Skipped by user.");
+        if (!req.approved && !req.denied) {
+            if (ImGui::Button("Approve")) {
+                applyIdx = req.id;
             }
+            ImGui::SameLine();
+            if (ImGui::Button("Deny")) {
+                skipIdx = req.id;
+            }
+        } else if (req.approved) {
+            if (req.executed) {
+                if (req.succeeded)
+                    ImGui::TextColored(col::Green, "  Applied successfully: %s", req.resultDetails.c_str());
+                else
+                    ImGui::TextColored(col::Red, "  Execution failed: %s", req.resultDetails.c_str());
+            } else {
+                ImGui::TextColored(col::Yellow, "  Pending execution...");
+            }
+        } else if (req.denied) {
+            ImGui::TextColored(col::Dim, "  Denied by user.");
         }
 
         ImGui::Separator();
         ImGui::PopID();
     }
 
-    // Process button actions OUTSIDE the lock (fixer callbacks call pushLog)
     if (applyIdx >= 0) {
-        auto& pf = fixesCopy[static_cast<size_t>(applyIdx)];
-        pf.approved = true;
-        pf.applied  = true;
-
-        std::vector<ai::GeminiProblem> single = {pf.problem};
-        auto results = fixer_.fixProblems(single);
-        pf.succeeded = !results.empty() && results[0].success;
-
-        if (pf.succeeded)
-            pushLog(LogEntry::INFO, "Fix applied: " + pf.problem.fixDescription);
-        else
-            pushLog(LogEntry::WARN, "Fix failed: " + pf.problem.fixDescription);
+        agent_.approveAction(applyIdx);
+        pushLog(LogEntry::INFO, "Action approved by user.");
     }
     if (skipIdx >= 0) {
-        fixesCopy[static_cast<size_t>(skipIdx)].denied = true;
-        pushLog(LogEntry::INFO, "Fix skipped: " +
-                fixesCopy[static_cast<size_t>(skipIdx)].problem.fixDescription);
-    }
-
-    // Write back modified state
-    if (applyIdx >= 0 || skipIdx >= 0) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        pendingFixes_ = std::move(fixesCopy);
+        agent_.denyAction(skipIdx);
+        pushLog(LogEntry::INFO, "Action denied by user.");
     }
 }
 

@@ -20,8 +20,7 @@
 
 namespace fikcer::agent {
 
-// ── Threat information ─────────────────────────────────────────────────────
-
+// Threat information 
 struct ThreatInfo {
     std::string name;           ///< Process or file name.
     std::string type;           ///< "malware", "miner", "suspicious", etc.
@@ -31,17 +30,17 @@ struct ThreatInfo {
     std::string severity;       ///< "low", "medium", "high", "critical"
 };
 
-// ── Service status ─────────────────────────────────────────────────────────
+// ── Service status
 
 struct ServiceInfo {
     std::string name;
     std::string status;         ///< "running", "stopped", "unknown"
 };
 
-// ── World State ────────────────────────────────────────────────────────────
+// ── World State 
 
 struct WorldState {
-    // ── Health ─────────────────────────────────────────────────────────────
+    // ── Health 
     double healthScore    = 100.0;  ///< Composite health score (0-100).
     double cpuPercent     = 0.0;    ///< Current CPU usage %.
     double memPercent     = 0.0;    ///< Current memory usage %.

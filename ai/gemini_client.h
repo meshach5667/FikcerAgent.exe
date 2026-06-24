@@ -53,7 +53,7 @@ public:
 
     /// Send a prompt to Gemini and get the raw text response.
     /// Returns empty string on failure.
-    [[nodiscard]] std::string ask(const std::string& prompt);
+    [[nodiscard]] std::string ask(const std::string& prompt, bool expectJson = false);
 
     /// Send system diagnostics to Gemini and get structured problems back.
     [[nodiscard]] std::vector<GeminiProblem> analyseSystem(
@@ -68,7 +68,7 @@ public:
 private:
     // ── Helpers ────────────────────────────────────────────────────────────
     [[nodiscard]] std::string loadApiKey() const;
-    [[nodiscard]] std::string buildRequestJson(const std::string& prompt) const;
+    [[nodiscard]] std::string buildRequestJson(const std::string& prompt, bool expectJson = false) const;
     [[nodiscard]] static std::string extractTextFromResponse(const std::string& json);
     [[nodiscard]] static std::string escapeJson(const std::string& s);
     [[nodiscard]] std::vector<GeminiProblem> parseProblems(const std::string& text) const;

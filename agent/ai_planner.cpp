@@ -35,7 +35,7 @@ std::vector<ActionPlan> AiPlanner::plan(
     }
 
     // Ask Gemini for structured JSON response.
-    std::string response = gemini.ask(prompt);
+    std::string response = gemini.ask(prompt, true);
     {
         std::lock_guard lock(mutex_);
         lastResponse_ = response;

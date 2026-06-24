@@ -176,11 +176,17 @@ std::string GeminiClient::escapeJson(const std::string& s) {
     return result;
 }
 
-std::string GeminiClient::buildRequestJson(const std::string& prompt) const {
+std::string GeminiClient::buildRequestJson(const std::string& prompt, bool expectJson) const {
     std::ostringstream oss;
     oss << R"({"contents":[{"parts":[{"text":")"
         << escapeJson(prompt)
-        << R"("}]}],"generationConfig":{"temperature":0.1,"maxOutputTokens":4096}})";
+        << R"("}]}],"generationConfig":{"temperature":0.1,"maxOutputTokens":4096)";
+    
+    if (expectJson) {
+        oss << R"(,"response_mime_type":"application/json")";
+    }
+    
+    oss << R"(}})";
     return oss.str();
 }
 
@@ -288,7 +294,7 @@ std::string GeminiClient::httpPost(const std::string& url,
 
 // ── Core API Methods ───────────────────────────────────────────────────────
 
-std::string GeminiClient::ask(const std::string& prompt) {
+std::string GeminiClient::ask(const std::string& prompt, bool expectJson) {
     if (!available_) {
         lastError_ = "AI client not initialised.";
         return "";
@@ -298,7 +304,7 @@ std::string GeminiClient::ask(const std::string& prompt) {
         "https://generativelanguage.googleapis.com/v1beta/models/" +
         model_ + ":generateContent?key=" + apiKey_;
 
-    std::string reqBody = buildRequestJson(prompt);
+    std::string reqBody = buildRequestJson(prompt, expectJson);
     std::string response = httpPost(url, reqBody);
 
     if (response.empty()) return "";

@@ -11,13 +11,7 @@
 
 #pragma once
 
-#include "core/monitor.h"
-#include "core/system_scanner.h"
-#include "ai/anomaly_detector.h"
-#include "ai/gemini_client.h"
-#include "actions/process_manager.h"
-#include "actions/auto_healer.h"
-#include "actions/system_fixer.h"
+#include "agent/agent.h"
 
 #include <atomic>
 #include <future>
@@ -96,21 +90,13 @@ private:
     GLFWwindow*        window_ = nullptr;
     std::atomic<bool>  shutdownRequested_{false};
 
-    // ── Backend modules ────────────────────────────────────────────────────
-    core::Monitor              monitor_;
-    actions::ProcessManager    procMgr_;
-    ai::AnomalyDetector        detector_;
-    actions::AutoHealer        healer_{procMgr_};
-    ai::GeminiClient           gemini_;
-    bool                       geminiReady_ = false;
-    core::SystemScanner        scanner_;
-    actions::SystemFixer       fixer_;
+    // ── Agent Backend ──────────────────────────────────────────────────────
+    agent::Agent       agent_;
 
     // ── Shared state (protected by mutex_) ─────────────────────────────────
     mutable std::mutex mutex_;
 
     // Dashboard
-    core::SystemStats latestStats_{};
     static constexpr std::size_t MAX_GRAPH_SAMPLES = 120;
     std::deque<float> cpuHistory_;
     std::deque<float> memHistory_;
@@ -119,45 +105,9 @@ private:
     static constexpr std::size_t MAX_ALERTS = 50;
     std::deque<ai::Anomaly> alerts_;
 
-    // Gemini
-    std::vector<ai::GeminiProblem> geminiProblems_;
-    std::vector<PendingFix>        pendingFixes_;
-    core::SystemDiagnostics        lastDiag_{};
-    std::string                    deepScanStatus_  = "Not yet run";
-
-    // Security (from last deep scan)
-    std::vector<core::SuspiciousProcess> suspiciousProcs_;
-    bool firewallEnabled_ = false;
-    core::NetworkStatus networkStatus_{};
-
-    // Process activity
-    static constexpr std::size_t MAX_PROCESS_ROWS = 12;
-    static constexpr std::size_t MAX_ACTIVITY_ROWS = 20;
-    std::vector<ai::ProcessResourceInfo> processSnapshot_;
-    std::deque<actions::ProcessInfo>     hungProcessHistory_;
-    std::deque<actions::HealRecord>      healHistory_;
-    std::deque<actions::FixRecord>       fixHistory_;
-    std::deque<std::vector<ai::Anomaly>> pendingHealBatches_;
-
     // Log viewer
     static constexpr std::size_t MAX_LOG_LINES = 200;
     std::deque<LogEntry> logLines_;
-
-    // Timing
-    std::chrono::steady_clock::time_point lastHeuristic_;
-    std::chrono::steady_clock::time_point lastDeep_;
-    std::chrono::steady_clock::time_point lastProcessRefresh_;
-
-    // Background tasks
-    std::future<void> deepScanTask_;
-    std::future<void> processRefreshTask_;
-    std::future<void> healTask_;
-    std::atomic<bool> deepScanRunning_{false};
-    std::atomic<bool> processRefreshRunning_{false};
-    std::atomic<bool> healRunning_{false};
-    std::atomic<bool> requestDeepScan_{false};
-
-    // (healer/fixer stats queried directly from the objects)
 };
 
 } // namespace fikcer::gui

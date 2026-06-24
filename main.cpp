@@ -212,6 +212,8 @@ static std::string friendlyTypeCli(const std::string& t) {
     return t;
 }
 
+#include "agent/agent.h"
+
 static int runCli() {
     using namespace fikcer;
 
@@ -231,112 +233,55 @@ static int runCli() {
   +=========================================================+
 )" << clr::RST << std::endl;
 
-    auto& logger = utils::Logger::instance();
-    if (!logger.init(std::string(config::LOG_DIRECTORY),
-                     config::LOG_FILE_PREFIX,
-                     config::MAX_LOG_FILE_SIZE,
-                     config::MAX_LOG_FILES,
-                     utils::LogLevel::INFO)) {
-        std::cerr << clr::RED << "  [!] Could not start logging.\n" << clr::RST;
-        return EXIT_FAILURE;
-    }
-    logger.info("FikcerAgent v2.0 CLI starting");
-
-    core::Monitor monitor;
-    monitor.setCallback(printDashboard);
-    if (!monitor.start(config::MONITOR_INTERVAL_MS)) {
-        std::cerr << clr::RED << "  [!] Health monitor failed.\n" << clr::RST;
-        return EXIT_FAILURE;
-    }
-
-    actions::ProcessManager procMgr;
-#ifdef __APPLE__
-    procMgr.addToWhitelist("TextEdit");
-    procMgr.addToWhitelist("Calculator");
-    procMgr.addToWhitelist("Notes");
-#endif
-    procMgr.setHungCallback([](const actions::ProcessInfo& info) {
-        std::cout << clr::RED << "  [!] \"" << info.name
-                  << "\" frozen.\n" << clr::RST;
-    });
-    procMgr.start(config::PROCESS_SCAN_INTERVAL_MS);
-
-    ai::AnomalyDetector detector;
-    actions::AutoHealer  healer(procMgr);
-    static constexpr unsigned int MAX_SHOWN = 5;
-
-    detector.setCallback([&healer](const std::vector<ai::Anomaly>& anomalies) {
-        if (anomalies.empty()) return;
-        auto sorted = anomalies;
-        std::sort(sorted.begin(), sorted.end(),
-                  [](auto& a, auto& b) {
-                      return static_cast<int>(a.severity) >
-                             static_cast<int>(b.severity);
-                  });
-        std::cout << "\n" << clr::YELLOW << "  --- " << anomalies.size()
-                  << " issue(s) ---" << clr::RST << "\n";
-        unsigned int shown = 0;
-        for (const auto& a : sorted) {
-            if (shown++ >= MAX_SHOWN) break;
-            std::cout << "  " << sevColor(a.severity)
-                      << "  " << friendlyAnomaly(a)
-                      << clr::RST << "\n";
+    agent::Agent coreAgent;
+    
+    // Register event callback before starting
+    coreAgent.setEventCallback([](const agent::AgentEvent& ev) {
+        if (ev.type == agent::AgentEvent::HEALTH_UPDATE) {
+            std::cout << "\n" << clr::CYAN << "  +--- " << ev.message << " ---+" << clr::RST << "\n";
+        } else if (ev.type == agent::AgentEvent::ALERT || ev.type == agent::AgentEvent::APPROVAL_NEEDED) {
+            std::cout << "  " << clr::YELLOW << "[!] " << ev.message << clr::RST << "\n";
+        } else if (ev.type == agent::AgentEvent::ACTION_TAKEN) {
+            std::cout << "  " << clr::GREEN << "[*] " << ev.message << clr::RST << "\n";
+        } else if (ev.severity == "error" || ev.severity == "critical") {
+            std::cout << "  " << clr::RED << "[E] " << ev.message << clr::RST << "\n";
+        } else if (ev.severity == "warn") {
+            std::cout << "  " << clr::YELLOW << "[W] " << ev.message << clr::RST << "\n";
+        } else {
+            // normal info logging is handled by logger, but we can print some to CLI
+            std::cout << "  " << clr::DIM << "[i] " << ev.message << clr::RST << "\n";
         }
-        healer.handleAnomalies(anomalies);
     });
 
-    ai::GeminiClient gemini;
-    bool geminiReady = gemini.init();
-    core::SystemScanner scanner;
-    actions::SystemFixer fixer;
+    if (!coreAgent.init()) {
+        std::cerr << clr::RED << "  [!] Failed to initialise FikcerAgent.\n" << clr::RST;
+        return EXIT_FAILURE;
+    }
 
-    std::cout << clr::GREEN << "  FikcerAgent running (CLI mode).\n"
-              << clr::RST;
+    if (!coreAgent.start()) {
+        std::cerr << clr::RED << "  [!] Failed to start agent loop.\n" << clr::RST;
+        return EXIT_FAILURE;
+    }
 
-    auto lastH = std::chrono::steady_clock::now();
-    auto lastD = std::chrono::steady_clock::now()
-                 - std::chrono::milliseconds(config::DEEP_SCAN_INTERVAL_MS - 10000);
+    std::cout << clr::GREEN << "  FikcerAgent running (CLI mode).\n" << clr::RST;
 
     while (!g_shutdownRequested.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        auto now = std::chrono::steady_clock::now();
-
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastH).count()
-            >= config::AI_SCAN_INTERVAL_MS) {
-            lastH = now;
-            detector.feed(monitor.latestStats(),
-                          ai::AnomalyDetector::sampleProcessResources());
-        }
-
-        if (geminiReady &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - lastD).count()
-            >= config::DEEP_SCAN_INTERVAL_MS) {
-            lastD = now;
-            std::cout << clr::BLUE << "  [scan] Deep system check...\n" << clr::RST;
-            auto diag = scanner.scan();
-            auto lat  = monitor.latestStats();
-            auto report = core::SystemScanner::generateReport(
-                diag, lat.cpuUsagePercent, lat.memUsagePercent,
-                lat.memTotalBytes, lat.memAvailableBytes);
-            auto problems = gemini.analyseSystem(report);
-            if (problems.empty()) {
-                std::cout << clr::GREEN << "  [ok] All healthy!\n" << clr::RST;
-            } else {
-                for (const auto& p : problems) {
-                    std::cout << "  " << gemColorCli(p.severity)
-                              << "[" << p.severity << "] "
-                              << friendlyTypeCli(p.type) << ": "
-                              << p.description << clr::RST << "\n";
-                }
-                fixer.fixProblems(problems);
-            }
+        
+        // Check for pending approvals and auto-approve in CLI for testing
+        // Or we could prompt the user. For simplicity, just list them.
+        auto approvals = coreAgent.pendingApprovals();
+        for (const auto& req : approvals) {
+            std::cout << clr::YELLOW << "  [APPROVAL NEEDED] " 
+                      << req.plan.recommendedAction << " (" << req.impact.impactDescription << ")\n"
+                      << "  Reasoning: " << req.plan.reasoning << "\n"
+                      << "  Auto-approving in CLI mode for demonstration..." << clr::RST << "\n";
+            coreAgent.approveAction(req.id);
         }
     }
 
     std::cout << clr::CYAN << "  Shutting down...\n" << clr::RST;
-    procMgr.stop();
-    monitor.stop();
-    logger.shutdown();
+    coreAgent.stop();
     std::cout << clr::GREEN << "  FikcerAgent stopped. Stay safe!\n" << clr::RST;
     return EXIT_SUCCESS;
 }
