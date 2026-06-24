@@ -54,8 +54,6 @@ namespace clr {
     constexpr const char* RED     = "\033[1;31m";
     constexpr const char* GREEN   = "\033[1;32m";
     constexpr const char* YELLOW  = "\033[1;33m";
-    constexpr const char* BLUE    = "\033[1;34m";
-    constexpr const char* MAGENTA = "\033[1;35m";
     constexpr const char* CYAN    = "\033[1;36m";
     constexpr const char* DIM     = "\033[2m";
 }
@@ -80,137 +78,7 @@ static void signalHandler(int /*sig*/) {
 }
 #endif
 
-static std::string formatBytes(uint64_t bytes) {
-    constexpr double GB = 1024.0 * 1024.0 * 1024.0;
-    constexpr double MB = 1024.0 * 1024.0;
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(1);
-    if (bytes >= static_cast<uint64_t>(GB))
-        oss << static_cast<double>(bytes) / GB << " GB";
-    else
-        oss << static_cast<double>(bytes) / MB << " MB";
-    return oss.str();
-}
-
-static std::string healthBar(double percent) {
-    if (percent < 50.0)  return std::string(clr::GREEN)  + "Good"       + clr::RST;
-    if (percent < 75.0)  return std::string(clr::YELLOW) + "Moderate"   + clr::RST;
-    if (percent < 90.0)  return std::string(clr::RED)    + "High"       + clr::RST;
-    return std::string(clr::MAGENTA) + "Critical!" + clr::RST;
-}
-
-static void printDashboard(const fikcer::core::SystemStats& stats) {
-    std::ostringstream o;
-    o << std::fixed << std::setprecision(1);
-
-    o << "\n" << clr::CYAN
-      << "  +------------------------------------------------+\n"
-      << "  |           Your Computer Health                  |\n"
-      << "  +------------------------------------------------+\n"
-      << clr::RST;
-
-    o << "  |  " << clr::BOLD << "Processor (CPU)" << clr::RST
-      << ":  " << std::setw(5) << stats.cpuUsagePercent << "%  "
-      << healthBar(stats.cpuUsagePercent) << "\n";
-
-    o << "  |  " << clr::BOLD << "Memory    (RAM)" << clr::RST
-      << ":  " << std::setw(5) << stats.memUsagePercent << "%  "
-      << healthBar(stats.memUsagePercent) << "\n";
-
-    o << "  |  " << clr::DIM
-      << "Using " << formatBytes(stats.memTotalBytes - stats.memAvailableBytes)
-      << " of " << formatBytes(stats.memTotalBytes)
-      << " (" << formatBytes(stats.memAvailableBytes) << " free)"
-      << clr::RST << "\n";
-
-    o << clr::CYAN
-      << "  +------------------------------------------------+"
-      << clr::RST << "\n";
-
-    std::cout << o.str() << std::flush;
-
-    std::ostringstream logLine;
-    logLine << std::fixed << std::setprecision(1)
-            << "CPU=" << stats.cpuUsagePercent << "% "
-            << "RAM=" << stats.memUsagePercent << "% "
-            << "(" << formatBytes(stats.memAvailableBytes) << " free)";
-    fikcer::utils::Logger::instance().info(logLine.str());
-}
-
-static std::string friendlyAnomaly(const fikcer::ai::Anomaly& a) {
-    using fikcer::ai::AnomalyType;
-    std::ostringstream m;
-    switch (a.type) {
-        case AnomalyType::CPU_SPIKE:
-            m << "Your processor is working very hard ("
-              << static_cast<int>(a.metricValue) << "% used).";
-            break;
-        case AnomalyType::CPU_RAMP:
-            m << "Processor usage is climbing quickly.";
-            break;
-        case AnomalyType::MEMORY_SPIKE:
-            m << "Running low on memory ("
-              << static_cast<int>(a.metricValue) << "% used).";
-            break;
-        case AnomalyType::MEMORY_LEAK:
-            m << "Memory keeps growing — an app may have a leak.";
-            break;
-        case AnomalyType::PROCESS_CPU_HOG:
-            if (!a.relatedProcess.empty())
-                m << "\"" << a.relatedProcess << "\" hogging processor ("
-                  << static_cast<int>(a.metricValue) << "%).";
-            else
-                m << "A program is hogging the processor.";
-            break;
-        case AnomalyType::PROCESS_MEM_HOG:
-            if (!a.relatedProcess.empty())
-                m << "\"" << a.relatedProcess << "\" using too much memory.";
-            else
-                m << "A program is using excessive memory.";
-            break;
-        case AnomalyType::SYSTEM_OVERLOAD:
-            m << "Computer is severely overloaded!";
-            break;
-        default:
-            m << a.description;
-            break;
-    }
-    return m.str();
-}
-
-static const char* sevColor(fikcer::ai::Severity s) {
-    using S = fikcer::ai::Severity;
-    switch (s) {
-        case S::LOW:      return clr::DIM;
-        case S::MEDIUM:   return clr::YELLOW;
-        case S::HIGH:     return clr::RED;
-        case S::CRITICAL: return clr::MAGENTA;
-    }
-    return clr::RST;
-}
-
-static const char* gemColorCli(const std::string& s) {
-    if (s == "CRITICAL") return clr::MAGENTA;
-    if (s == "HIGH")     return clr::RED;
-    if (s == "MEDIUM")   return clr::YELLOW;
-    return clr::DIM;
-}
-
-static std::string friendlyTypeCli(const std::string& t) {
-    if (t == "DISK_SPACE")  return "Disk Space";
-    if (t == "DISK_HEALTH") return "Disk Health";
-    if (t == "NETWORK")     return "Network";
-    if (t == "DNS")         return "Internet / DNS";
-    if (t == "MALWARE")     return "Security Threat";
-    if (t == "MEMORY")      return "Memory";
-    if (t == "CPU")         return "Processor";
-    if (t == "TEMPERATURE") return "Overheating";
-    if (t == "BATTERY")     return "Battery";
-    if (t == "DRIVER")      return "Driver Issue";
-    if (t == "INTEGRITY")   return "System Files";
-    if (t == "STARTUP")     return "Startup Programs";
-    return t;
-}
+// END HELPERS
 
 #include "agent/agent.h"
 

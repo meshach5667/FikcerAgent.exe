@@ -88,29 +88,6 @@ static ImVec4 severityColor(fikcer::ai::Severity s) {
     return col::White;
 }
 
-static ImVec4 gemColor(const std::string& s) {
-    if (s == "CRITICAL") return col::Magenta;
-    if (s == "HIGH")     return col::Red;
-    if (s == "MEDIUM")   return col::Yellow;
-    return col::Dim;
-}
-
-static std::string friendlyType(const std::string& t) {
-    if (t == "DISK_SPACE")  return "Disk Space";
-    if (t == "DISK_HEALTH") return "Disk Health";
-    if (t == "NETWORK")     return "Network";
-    if (t == "DNS")         return "Internet / DNS";
-    if (t == "MALWARE")     return "Security Threat";
-    if (t == "MEMORY")      return "Memory";
-    if (t == "CPU")         return "Processor";
-    if (t == "TEMPERATURE") return "Overheating";
-    if (t == "BATTERY")     return "Battery";
-    if (t == "DRIVER")      return "Driver Issue";
-    if (t == "INTEGRITY")   return "System Files";
-    if (t == "STARTUP")     return "Startup Programs";
-    return t;
-}
-
 // ── GLFW error callback ───────────────────────────────────────────────────
 static void glfwErrorCb(int /*error*/, const char* desc) {
     std::fprintf(stderr, "[GLFW Error] %s\n", desc);
@@ -365,14 +342,8 @@ void App::requestShutdown() {
 void App::drawDashboard() {
     auto ws = agent_.worldState();
     
-    float cpu = 0.0f;
-    float mem = 0.0f;
-    if (ws.metrics.find("cpu_usage_percent") != ws.metrics.end()) {
-        cpu = static_cast<float>(ws.metrics.at("cpu_usage_percent"));
-    }
-    if (ws.metrics.find("mem_usage_percent") != ws.metrics.end()) {
-        mem = static_cast<float>(ws.metrics.at("mem_usage_percent"));
-    }
+    float cpu = static_cast<float>(ws.cpuPercent);
+    float mem = static_cast<float>(ws.memPercent);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -443,7 +414,7 @@ void App::drawDashboard() {
     auto goals = agent_.goals();
     int metGoals = 0;
     for (const auto& g : goals) {
-        if (g.isMet) metGoals++;
+        if (g.satisfied) metGoals++;
     }
     
     ImGui::TextColored(col::Cyan, "Goals Met");
@@ -538,7 +509,7 @@ void App::drawGeminiPanel() {
             ImGui::Spacing();
             ImGui::TextColored(col::Dim, "Recent AI Plans:");
             for (const auto& plan : recent) {
-                ImGui::BulletText("%s (Score: %d)", plan.recommendedAction.c_str(), plan.confidenceScore);
+                ImGui::BulletText("%s (Score: %.2f)", plan.recommendedAction.c_str(), plan.confidence);
             }
         }
         return;
@@ -555,12 +526,11 @@ void App::drawGeminiPanel() {
 
         ImVec4 c = col::Yellow;
         if (req.impact.risk == agent::RiskLevel::HIGH) c = col::Red;
-        else if (req.impact.risk == agent::RiskLevel::CRITICAL) c = col::Magenta;
 
         ImGui::TextColored(c, "[%s RISK]", req.impact.impactDescription.c_str());
         ImGui::SameLine();
         ImGui::TextColored(col::White, "Action: %s", req.plan.recommendedAction.c_str());
-        ImGui::TextWrapped("  Goal: %s", req.plan.targetGoal.c_str());
+        ImGui::TextWrapped("  Issue: %s", req.plan.issue.c_str());
         ImGui::TextWrapped("  Reasoning: %s", req.plan.reasoning.c_str());
 
         if (!req.approved && !req.denied) {
@@ -602,30 +572,37 @@ void App::drawGeminiPanel() {
 // Security panel
 // ============================================================================
 void App::drawSecurityPanel() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    auto ws = agent_.worldState();
 
     ImGui::Spacing();
 
     // Firewall
     ImGui::TextColored(col::Cyan, "Firewall:");
     ImGui::SameLine();
-    if (firewallEnabled_)
+    if (ws.firewallEnabled)
         ImGui::TextColored(col::Green, "Enabled");
     else
         ImGui::TextColored(col::Red, "Disabled — consider turning it on!");
 
-    // Network
+    ImGui::TextColored(col::Cyan, "Network Interface:");
+    ImGui::SameLine();
+    ImGui::TextColored(col::White, "%s", ws.activeInterface.c_str());
+
+    ImGui::TextColored(col::Cyan, "Gateway:");
+    ImGui::SameLine();
+    ImGui::TextColored(col::White, "%s", ws.gateway.c_str());
+
     ImGui::TextColored(col::Cyan, "Internet:");
     ImGui::SameLine();
-    if (networkStatus_.internetReachable)
-        ImGui::TextColored(col::Green, "Connected");
+    if (ws.internetReachable)
+        ImGui::TextColored(col::Green, "Connected (ping: %.0f ms)", ws.pingLatencyMs);
     else
-        ImGui::TextColored(col::Red, "Not reachable");
+        ImGui::TextColored(col::Red, "Offline");
 
     ImGui::TextColored(col::Cyan, "DNS:");
     ImGui::SameLine();
-    if (networkStatus_.dnsWorking)
-        ImGui::TextColored(col::Green, "Working (%.0f ms)", networkStatus_.dnsLatencyMs);
+    if (ws.dnsWorking)
+        ImGui::TextColored(col::Green, "Working (%.0f ms)", ws.dnsLatencyMs);
     else
         ImGui::TextColored(col::Red, "Not working");
 
@@ -634,13 +611,12 @@ void App::drawSecurityPanel() {
     ImGui::Spacing();
 
     // Suspicious processes
-    ImGui::TextColored(col::Cyan, "Suspicious Processes:");
-    if (suspiciousProcs_.empty()) {
+    ImGui::TextColored(col::Cyan, "Active Threats:");
+    if (ws.activeThreats.empty()) {
         ImGui::TextColored(col::Green, "  None detected. You're safe!");
     } else {
-        for (const auto& sp : suspiciousProcs_) {
-            ImGui::TextColored(col::Red, "  [!] \"%s\" (PID %u)",
-                               sp.name.c_str(), sp.pid);
+        for (const auto& sp : ws.activeThreats) {
+            ImGui::TextColored(col::Red, "  [!] \"%s\" (PID %u)", sp.name.c_str(), sp.pid);
             ImGui::TextColored(col::Dim, "      Reason: %s", sp.reason.c_str());
         }
     }
@@ -650,9 +626,9 @@ void App::drawSecurityPanel() {
     ImGui::Spacing();
 
     // Disk info
-    if (!lastDiag_.disks.empty()) {
+    if (!ws.disks.empty()) {
         ImGui::TextColored(col::Cyan, "Disk Usage:");
-        for (const auto& d : lastDiag_.disks) {
+        for (const auto& d : ws.disks) {
             ImVec4 c = d.usagePercent > 90 ? col::Red :
                        d.usagePercent > 75 ? col::Yellow : col::Green;
             ImGui::TextColored(c, "  %s  %.1f%% used (%s free)",
@@ -662,14 +638,13 @@ void App::drawSecurityPanel() {
     }
 
     // Battery
-    if (lastDiag_.battery.hasBattery) {
+    if (ws.hasBattery) {
         ImGui::Spacing();
         ImGui::TextColored(col::Cyan, "Battery:");
-        ImVec4 bc = lastDiag_.battery.chargePercent > 20 ? col::Green : col::Red;
-        ImGui::TextColored(bc, "  %.0f%% %s  (%s)",
-                           lastDiag_.battery.chargePercent,
-                           lastDiag_.battery.isCharging ? "(charging)" : "",
-                           lastDiag_.battery.condition.c_str());
+        ImVec4 bc = ws.batteryPercent > 20 ? col::Green : col::Red;
+        ImGui::TextColored(bc, "  %.0f%% %s",
+                           ws.batteryPercent,
+                           ws.batteryCharging ? "(charging)" : "");
     }
 }
 
@@ -740,61 +715,6 @@ void App::pushLog(LogEntry::Level lvl, const std::string& msg) {
     }
 }
 
-// ============================================================================
-// Backend callbacks
-// ============================================================================
-void App::onStats(const core::SystemStats& stats) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    latestStats_ = stats;
-
-    cpuHistory_.push_back(static_cast<float>(stats.cpuUsagePercent));
-    memHistory_.push_back(static_cast<float>(stats.memUsagePercent));
-    while (cpuHistory_.size() > MAX_GRAPH_SAMPLES) cpuHistory_.pop_front();
-    while (memHistory_.size() > MAX_GRAPH_SAMPLES) memHistory_.pop_front();
-}
-
-void App::onAnomalies(const std::vector<ai::Anomaly>& anomalies) {
-    // Store alerts under lock
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& a : anomalies) {
-            alerts_.push_back(a);
-        }
-        while (alerts_.size() > MAX_ALERTS) alerts_.pop_front();
-    }
-
-    // Send OS notification for HIGH / CRITICAL anomalies
-    if constexpr (config::NOTIFICATIONS_ENABLED) {
-        for (const auto& a : anomalies) {
-            if (a.severity == ai::Severity::HIGH ||
-                a.severity == ai::Severity::CRITICAL) {
-                std::string sev = (a.severity == ai::Severity::CRITICAL)
-                                  ? "CRITICAL" : "HIGH";
-                std::string body;
-                if (!a.relatedProcess.empty())
-                    body = "\"" + a.relatedProcess + "\" – " + a.description;
-                else
-                    body = a.description;
-                utils::sendNotification(
-                    "FikcerAgent \xe2\x80\x93 " + sev + " Alert", body);
-            }
-        }
-    }
-
-    // Call healer OUTSIDE the lock – its callbacks call pushLog which
-    // needs mutex_, so holding it here would cause a recursive deadlock.
-    auto records = healer_.handleAnomalies(anomalies);
-
-    // Store heal results back under the lock
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& r : records) {
-            if (r.action != actions::HealAction::LOG_ONLY &&
-                r.action != actions::HealAction::NONE) {
-                logLines_.push_back({LogEntry::INFO, "Auto-fix: " + r.description});
-            }
-        }
-    }
-}
+// End of App
 
 } // namespace fikcer::gui

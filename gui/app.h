@@ -77,14 +77,6 @@ private:
     // ── UI helpers ─────────────────────────────────────────────────────────
     void drawHealthGauge(const char* label, float value, float warnAt, float critAt);
     void pushLog(LogEntry::Level lvl, const std::string& msg);
-    void launchDeepScan();
-    void launchProcessRefresh();
-    void launchHealIfNeeded();
-    void waitForBackgroundTasks();
-
-    // ── Backend callbacks ──────────────────────────────────────────────────
-    void onStats(const core::SystemStats& stats);
-    void onAnomalies(const std::vector<ai::Anomaly>& anomalies);
 
     // ── Window state ───────────────────────────────────────────────────────
     GLFWwindow*        window_ = nullptr;
