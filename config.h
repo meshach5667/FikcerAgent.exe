@@ -101,4 +101,31 @@ inline constexpr std::string_view AUTO_FIX_MAX_SEVERITY = "MEDIUM";
 /// Send native OS notifications for critical issues and applied fixes.
 inline constexpr bool NOTIFICATIONS_ENABLED = true;
 
+// ── Agent Loop ────────────────────────────────────────────────────────────
+/// Main agent tick interval (ms).  Controls how often the agent evaluates.
+inline constexpr int AGENT_LOOP_INTERVAL_MS = 5000;
+
+/// Interval for health score recalculation (ms).
+inline constexpr int HEALTH_SCORE_UPDATE_INTERVAL_MS = 10000;
+
+// ── Persistent Memory ────────────────────────────────────────────────────
+/// Maximum number of incidents stored in the database.
+inline constexpr int MAX_INCIDENT_HISTORY = 1000;
+
+/// Minimum attempts before trusting an action's success rate.
+inline constexpr int LEARNING_MIN_SAMPLES = 5;
+
+// ── Risk & Approval ──────────────────────────────────────────────────────
+/// If true, HIGH-risk actions always require explicit user approval.
+inline constexpr bool HIGH_RISK_ALWAYS_ASK = true;
+
+// ── Health Score Weights ─────────────────────────────────────────────────
+inline constexpr double HEALTH_WEIGHT_CPU      = 0.15;
+inline constexpr double HEALTH_WEIGHT_MEMORY   = 0.15;
+inline constexpr double HEALTH_WEIGHT_DISK     = 0.15;
+inline constexpr double HEALTH_WEIGHT_SECURITY = 0.20;
+inline constexpr double HEALTH_WEIGHT_SERVICES = 0.10;
+inline constexpr double HEALTH_WEIGHT_THREATS  = 0.15;
+inline constexpr double HEALTH_WEIGHT_RECOVERY = 0.10;
+
 } // namespace fikcer::config
