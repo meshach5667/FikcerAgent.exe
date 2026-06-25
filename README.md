@@ -1,4 +1,4 @@
-# FikcerAgent – Autonomous Self-Healing System Agent
+# FikcerAgent 
 
 > **Cross-platform** · C++20 · macOS (Clang) / Windows (MSVC)
 
@@ -124,9 +124,4 @@ Processes **not** on the whitelist are logged but never touched.
 
 
 
----
 
-
-## License
-
-MIT – see `LICENSE` for details.
