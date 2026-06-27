@@ -107,20 +107,7 @@ procMgr.addToWhitelist("yourapp.exe");
 
 Processes **not** on the whitelist are logged but never touched.
 
----
-
-## Safety & Security
-
-| Concern | Mitigation |
-|---------|-----------|
-| Arbitrary command execution | Process launch uses **only** the full path obtained from the OS — no shell, no command line args (`posix_spawn` on macOS, `CreateProcessW` on Windows) |
-| Runaway restarts | Per-process cap (`MAX_RESTART_ATTEMPTS`) prevents infinite loops |
-| Dry-run mode | Set `DRY_RUN = true` in `config.h` to observe without acting |
-| Handle leaks | Every `OpenProcess` / `CreateProcess` handle is closed immediately after use |
-| Thread safety | Logger uses a mutex; Monitor and ProcessManager use atomics + fine-grained locks |
-| Buffer overruns | MSVC `/sdl /GS /guard:cf` flags (Windows); `-Wall -Wextra -Wpedantic -Werror` (macOS/Clang); no raw C arrays for user data |
-
----
+## Built by MESH
 
 
 
