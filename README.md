@@ -112,3 +112,8 @@ Processes **not** on the whitelist are logged but never touched.
 
 
 
+
+
+# TODOs
+
+* Fix battery status - it is showing charging even when the laptop is unplugged. 

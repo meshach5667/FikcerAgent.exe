@@ -47,7 +47,7 @@ static int runGui() {
 
 
 
-// ── ANSI colour helpers ────────────────────────────────────────────────────
+// ── ANSI colour helpers
 namespace clr {
     constexpr const char* RST     = "\033[0m";
     constexpr const char* BOLD    = "\033[1m";
