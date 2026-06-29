@@ -76,6 +76,7 @@ private:
 
     // ── UI helpers ─────────────────────────────────────────────────────────
     void drawHealthGauge(const char* label, float value, float warnAt, float critAt);
+    void drawActivityFeed();
     void pushLog(LogEntry::Level lvl, const std::string& msg);
 
     // ── Window state ───────────────────────────────────────────────────────

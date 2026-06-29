@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <iomanip>
 
 namespace fikcer::agent {
 
@@ -266,6 +267,11 @@ void Agent::observe() {
         worldState_.update(stats, diag, latestAnomalies_, processes, health);
         currentHealthScore_ = health;
         healthDetails_ = details;
+    }
+
+    WorldState stateCopy;
+    {
+        std::lock_guard lock(mutex_);
         stateCopy = worldState_;
     }
 
@@ -548,7 +554,7 @@ void Agent::learn() {
     double overallRate = learning_.overallSuccessRate(memory_);
     std::ostringstream msg;
     msg << "I recorded the latest outcome. My overall action success rate is "
-        << static_cast<int>(overallRate * 100) << "%."];
+        << static_cast<int>(overallRate * 100) << "%.";
     emitEvent(AgentEvent::LOG, msg.str(), "info");
 }
 

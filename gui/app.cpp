@@ -357,6 +357,15 @@ void App::drawDashboard() {
 
     ImGui::Spacing();
 
+    // ── Live Activity Feed ─────────────────────────────────────────────────
+    ImGui::TextColored(col::Cyan, "What the AI is Doing Now:");
+    ImGui::Separator();
+    drawActivityFeed();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // ── CPU gauge ──────────────────────────────────────────────────────────
     drawHealthGauge("Processor (CPU)", cpu / 100.0f, 0.50f, 0.90f);
     ImGui::SameLine();
@@ -478,6 +487,44 @@ void App::drawAlerts() {
 }
 
 // ============================================================================
+// Activity Feed - plain English narrative
+// ============================================================================
+void App::drawActivityFeed() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    ImGui::Spacing();
+    ImGui::TextColored(col::Cyan, "Live Activity:");
+    ImGui::Separator();
+
+    if (logLines_.empty()) {
+        ImGui::TextColored(col::Dim, "  (Waiting for the agent to report activity...)");
+        return;
+    }
+
+    ImGui::BeginChild("##activityScroll", ImVec2(0, 200), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+
+    // Show the last 15 log lines as a narrative
+    const std::size_t start = logLines_.size() > 15 ? logLines_.size() - 15 : 0;
+    for (std::size_t i = start; i < logLines_.size(); ++i) {
+        const auto& entry = logLines_[i];
+        ImVec4 c;
+        const char* prefix;
+        switch (entry.level) {
+            case LogEntry::INFO: c = col::Green;  prefix = "✓"; break;
+            case LogEntry::WARN: c = col::Yellow; prefix = "⚠"; break;
+            case LogEntry::ERR:  c = col::Red;    prefix = "✕"; break;
+            default:             c = col::White;  prefix = "•"; break;
+        }
+        ImGui::TextColored(c, "%s %s", prefix, entry.text.c_str());
+    }
+
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f)
+        ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+}
+
+// ============================================================================
 // Gemini AI panel
 // ============================================================================
 void App::drawGeminiPanel() {
@@ -487,7 +534,9 @@ void App::drawGeminiPanel() {
         ImGui::TextColored(col::Yellow,
             "Gemini AI is not available. Set the FIKCER_GEMINI_API_KEY "
             "environment variable to enable.");
-        return;
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
     }
 
     auto approvals = agent_.pendingApprovals();
@@ -497,6 +546,18 @@ void App::drawGeminiPanel() {
     ImGui::SameLine();
     ImGui::TextColored(col::Green, "Active");
 
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Show available skills and tools
+    ImGui::TextColored(col::Cyan, "Available Skills & Tools:");
+    ImGui::TextColored(col::Dim, 
+        "  • Monitoring: CPU, memory, disk, network, firewall, process list\n"
+        "  • Recovery: process restart, DNS flush, firewall, cleanup, network reset\n"
+        "  • Security: file quarantine, IP blocking, process analysis, startup disable\n"
+        "  • Verification: health score, metric checks");
+
+    ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
