@@ -104,6 +104,7 @@ std::string AiPlanner::buildPrompt(
          "- Identify any issues that need corrective action.\n"
          "- For each issue, recommend ONE specific tool from the available tools list.\n"
          "- Only recommend tools that are in the available list.\n"
+            "- Use the skills and tools catalog below to choose the right capability.\n"
          "- Consider historical action success rates when choosing tools.\n"
          "- Respect user preferences (never do something the user has blocked).\n"
          "- If everything is healthy, respond with: {\"plans\": []}\n\n";

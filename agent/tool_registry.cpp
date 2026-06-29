@@ -481,7 +481,41 @@ std::string ToolRegistry::toolsForPlanner() const {
     std::lock_guard lock(mutex_);
 
     std::ostringstream oss;
-    oss << "AVAILABLE TOOLS:\n";
+    oss << "AVAILABLE SKILLS AND TOOLS:\n";
+    oss << "  Skills: monitoring, recovery, security, verification.\n";
+    oss << "  The agent may only use the registered tools below.\n\n";
+
+    oss << "TOOLS BY SKILL:\n";
+
+    auto writeCategory = [&](ToolCategory cat, const char* label) {
+        oss << "  " << label << ":\n";
+        bool any = false;
+        for (const auto& [_, t] : tools_) {
+            if (t.category != cat) continue;
+            any = true;
+            oss << "    - " << t.name << " (risk=" << riskLevelTag(t.risk)
+                << ") — " << t.description;
+            if (!t.parameterNames.empty()) {
+                oss << " Params: [";
+                for (size_t i = 0; i < t.parameterNames.size(); ++i) {
+                    if (i) oss << ", ";
+                    oss << t.parameterNames[i];
+                }
+                oss << "]";
+            }
+            oss << "\n";
+        }
+        if (!any) {
+            oss << "    (none registered)\n";
+        }
+    };
+
+    writeCategory(ToolCategory::MONITORING,   "Monitoring");
+    writeCategory(ToolCategory::RECOVERY,     "Recovery");
+    writeCategory(ToolCategory::SECURITY,     "Security");
+    writeCategory(ToolCategory::VERIFICATION, "Verification");
+
+    oss << "\nAVAILABLE TOOLS:\n";
     for (const auto& [_, t] : tools_) {
         oss << "  " << t.name
             << " (" << toolCategoryTag(t.category)
