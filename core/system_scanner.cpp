@@ -374,25 +374,44 @@ void SystemScanner::scanBattery(SystemDiagnostics& d) {
         battInfo.find("Battery") != std::string::npos) {
         d.battery.hasBattery = true;
 
+        std::string batteryLine;
+        std::istringstream battStream(battInfo);
+        for (std::string line; std::getline(battStream, line);) {
+            if (line.find('%') != std::string::npos) {
+                batteryLine = line;
+                break;
+            }
+        }
+
         // Extract percentage.
-        auto pctPos = battInfo.find('%');
+        auto pctPos = batteryLine.find('%');
         if (pctPos != std::string::npos) {
             // Walk backwards to find the start of the number.
             auto numStart = pctPos;
-            while (numStart > 0 && (std::isdigit(battInfo[numStart - 1]) ||
-                                     battInfo[numStart - 1] == '.')) {
+            while (numStart > 0 && (std::isdigit(batteryLine[numStart - 1]) ||
+                                     batteryLine[numStart - 1] == '.')) {
                 numStart--;
             }
             try {
                 d.battery.chargePercent = std::stod(
-                    battInfo.substr(numStart, pctPos - numStart));
+                    batteryLine.substr(numStart, pctPos - numStart));
             } catch (...) {}
         }
 
-        d.battery.isCharging =
-            (battInfo.find("charging") != std::string::npos &&
-             battInfo.find("not charging") == std::string::npos) ||
-            battInfo.find("AC attached") != std::string::npos;
+        auto statusStart = batteryLine.find(';', pctPos);
+        if (statusStart != std::string::npos) {
+            statusStart++;
+            auto statusEnd = batteryLine.find(';', statusStart);
+            std::string status = batteryLine.substr(
+                statusStart,
+                statusEnd == std::string::npos ? std::string::npos
+                                               : statusEnd - statusStart);
+            status.erase(0, status.find_first_not_of(" \t"));
+            status.erase(status.find_last_not_of(" \t\r\n") + 1);
+
+            d.battery.isCharging =
+                (status == "charging" || status == "finishing charge");
+        }
 
         // Battery condition.
         std::string condResult = exec(
