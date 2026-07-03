@@ -17,6 +17,7 @@ FikcerAgent continuously monitors system state and detects:
 - Memory leaks and sustained high memory usage
 - Process-level resource hogs (CPU/memory)
 - System overload conditions
+- Slow-PC detection from sustained CPU and memory pressure
 - Disk space depletion
 - Disk health warnings (SMART)
 - High system temperature
@@ -94,6 +95,13 @@ The AI planner generates remediation strategies that:
 - **Windows**: Process control, device management, network diagnostics
 - **CLI Mode**: Terminal-based operation for headless deployments
 
+### **9. User Issue Reporting & Export**
+
+- The GUI includes a Reports tab for submitting plain-text issue reports to the agent.
+- Reports are recorded in the agent's incident history and trigger an investigation scan.
+- The Log tab can export the live log buffer as a `.txt` file under `logs/exports/`.
+- Issue reports can also be exported as plain text for sharing or archiving.
+
 ---
 
 ## 🤝 Contributing
@@ -158,6 +166,8 @@ cmake --build build
    - Any breaking changes?
 
 ### Reporting Issues
+
+Use the Reports tab in the GUI to submit a slow-PC report, bug, or security concern directly to FikcerAgent.
 
 Please include:
 - OS and version (macOS 12.x / Windows 11, etc.)

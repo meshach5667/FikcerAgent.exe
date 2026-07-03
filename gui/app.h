@@ -13,7 +13,9 @@
 
 #include "agent/agent.h"
 
+#include <array>
 #include <atomic>
+#include <filesystem>
 #include <future>
 #include <deque>
 #include <mutex>
@@ -72,12 +74,18 @@ private:
     void drawAlerts();
     void drawGeminiPanel();
     void drawSecurityPanel();
+    void drawIssueReporter();
     void drawLogViewer();
 
     // ── UI helpers ─────────────────────────────────────────────────────────
     void drawHealthGauge(const char* label, float value, float warnAt, float critAt);
     void drawActivityFeed();
     void pushLog(LogEntry::Level lvl, const std::string& msg);
+    bool exportLogLines();
+    bool exportIssueReport();
+    bool writeTextFile(const std::filesystem::path& filePath,
+                       const std::string& content);
+    std::string currentTimestampSlug() const;
 
     // ── Window state ───────────────────────────────────────────────────────
     GLFWwindow*        window_ = nullptr;
@@ -101,6 +109,13 @@ private:
     // Log viewer
     static constexpr std::size_t MAX_LOG_LINES = 200;
     std::deque<LogEntry> logLines_;
+
+    // Issue reporter
+    static constexpr std::size_t ISSUE_TITLE_MAX = 128;
+    static constexpr std::size_t ISSUE_DETAILS_MAX = 2048;
+    std::array<char, ISSUE_TITLE_MAX> issueTitle_{};
+    std::array<char, ISSUE_DETAILS_MAX> issueDetails_{};
+    int issueCategoryIndex_ = 0;
 };
 
 } // namespace fikcer::gui

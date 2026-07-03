@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(FikcerAgent
     VERSION   2.0.0
-    LANGUAGES CXX
+    LANGUAGES CXX OBJCXX
     DESCRIPTION "Autonomous self-healing cross-platform system agent with GUI"
 )
 
@@ -41,6 +41,7 @@ set(IMGUI_SOURCES
 set(SOURCES
     main.cpp
     gui/app.cpp
+    gui/native_save_dialog.mm
     core/monitor.cpp
     core/system_scanner.cpp
     actions/process_manager.cpp
@@ -121,9 +122,11 @@ if(WIN32)
 elseif(APPLE)
     find_library(CORE_FOUNDATION CoreFoundation)
     find_library(IO_KIT IOKit)
+    find_library(APP_KIT AppKit)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         ${CORE_FOUNDATION}
         ${IO_KIT}
+        ${APP_KIT}
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE _DARWIN_C_SOURCE)
 endif()

@@ -4,6 +4,7 @@
 #define GL_SILENCE_DEPRECATION   // Suppress macOS OpenGL deprecation warnings
 
 #include "gui/app.h"
+#include "gui/native_save_dialog.h"
 #include "config.h"
 #include "utils/logger.h"
 #include "utils/notify.h"
@@ -15,9 +16,13 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iomanip>
 #include <sstream>
@@ -72,6 +77,8 @@ static std::string friendlyAnomaly(const fikcer::ai::Anomaly& a) {
             return "A program is using excessive memory.";
         case AnomalyType::SYSTEM_OVERLOAD:
             return "Computer is severely overloaded!";
+        case AnomalyType::SLOW_PC:
+            return "Computer is likely feeling slow due to sustained load.";
         default:
             return a.description;
     }
@@ -86,6 +93,38 @@ static ImVec4 severityColor(fikcer::ai::Severity s) {
         case S::CRITICAL: return col::Magenta;
     }
     return col::White;
+}
+
+static const char* logLevelLabel(fikcer::gui::LogEntry::Level level) {
+    switch (level) {
+        case fikcer::gui::LogEntry::INFO: return "INFO";
+        case fikcer::gui::LogEntry::WARN: return "WARN";
+        case fikcer::gui::LogEntry::ERR:  return "ERROR";
+    }
+    return "INFO";
+}
+
+static constexpr std::array<const char*, 5> issueCategories = {
+    "Performance",
+    "Slow PC",
+    "Security",
+    "Bug",
+    "Other"
+};
+
+static std::string timestampSlug() {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y%m%d-%H%M%S");
+    return oss.str();
 }
 
 // ── GLFW error callback ───────────────────────────────────────────────────
@@ -311,6 +350,10 @@ void App::run() {
                 }
                 if (ImGui::BeginTabItem("Security")) {
                     drawSecurityPanel();
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Reports")) {
+                    drawIssueReporter();
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Log")) {
@@ -710,21 +753,104 @@ void App::drawSecurityPanel() {
 }
 
 // ============================================================================
+// Reports tab
+// ============================================================================
+void App::drawIssueReporter() {
+    ImGui::Spacing();
+    ImGui::TextColored(col::Cyan, "Report an issue for FikcerAgent");
+    ImGui::TextColored(col::Dim,
+        "Send a problem description to the agent so it can investigate it on the next scan.");
+    ImGui::Separator();
+
+    ImGui::Text("Category");
+    ImGui::SetNextItemWidth(260.0f);
+    ImGui::Combo("##issueCategory", &issueCategoryIndex_, issueCategories.data(),
+                 static_cast<int>(issueCategories.size()));
+
+    ImGui::Spacing();
+    ImGui::Text("Title");
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputText("##issueTitle", issueTitle_.data(), issueTitle_.size());
+
+    ImGui::Spacing();
+    ImGui::Text("Details");
+    ImGui::InputTextMultiline("##issueDetails", issueDetails_.data(),
+                              issueDetails_.size(), ImVec2(-1.0f, 160.0f));
+
+    ImGui::Spacing();
+    if (ImGui::Button("Send to Agent")) {
+        const char* category = issueCategories[issueCategoryIndex_];
+        bool accepted = agent_.submitUserIssue(
+            category,
+            issueTitle_.data(),
+            issueDetails_.data());
+
+        if (accepted) {
+            pushLog(LogEntry::INFO, std::string("User issue submitted: ") + issueTitle_.data());
+            issueTitle_.fill('\0');
+            issueDetails_.fill('\0');
+            issueCategoryIndex_ = 0;
+        } else {
+            pushLog(LogEntry::ERR, "Failed to submit user issue report.");
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Export Issue as TXT")) {
+        if (exportIssueReport()) {
+            pushLog(LogEntry::INFO, "Exported issue report as plain text.");
+        } else {
+            pushLog(LogEntry::ERR, "Failed to export issue report.");
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextColored(col::Cyan, "Recent reports stored by the agent");
+    auto incidents = agent_.memory().getRecentIncidents(5);
+    if (incidents.empty()) {
+        ImGui::TextColored(col::Dim, "No reports have been recorded yet.");
+    } else {
+        for (const auto& incident : incidents) {
+            ImGui::BulletText("[%s] %s", incident.severity.c_str(), incident.problem.c_str());
+            if (!incident.rootCause.empty()) {
+                ImGui::TextColored(col::Dim, "  %s", incident.rootCause.c_str());
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Log viewer
 // ============================================================================
 void App::drawLogViewer() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::deque<LogEntry> entries;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        entries = logLines_;
+    }
 
     ImGui::Spacing();
     if (ImGui::Button("Clear Log")) {
+        std::lock_guard<std::mutex> lock(mutex_);
         logLines_.clear();
         return;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Export Logs as TXT")) {
+        if (exportLogLines()) {
+            pushLog(LogEntry::INFO, "Exported logs as plain text.");
+        } else {
+            pushLog(LogEntry::ERR, "Failed to export logs.");
+        }
     }
     ImGui::Separator();
 
     ImGui::BeginChild("##logScroll", ImVec2(0, 0), ImGuiChildFlags_None,
                       ImGuiWindowFlags_HorizontalScrollbar);
-    for (const auto& entry : logLines_) {
+    for (const auto& entry : entries) {
         ImVec4 c;
         const char* prefix;
         switch (entry.level) {
@@ -774,6 +900,95 @@ void App::pushLog(LogEntry::Level lvl, const std::string& msg) {
         case LogEntry::WARN: logger.warn(msg); break;
         case LogEntry::ERR:  logger.error(msg); break;
     }
+}
+
+bool App::exportLogLines() {
+    std::deque<LogEntry> entries;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        entries = logLines_;
+    }
+
+    auto savePath = chooseNativeSavePath(
+        "Save FikcerAgent Logs",
+        "fikcerAgent-logs-" + timestampSlug() + ".txt",
+        "txt");
+    if (!savePath) {
+        return false;
+    }
+
+    std::ostringstream content;
+    content << "FikcerAgent Log Export\n";
+    content << "Generated: " << timestampSlug() << "\n\n";
+    for (const auto& entry : entries) {
+        content << "[" << logLevelLabel(entry.level) << "] " << entry.text << '\n';
+    }
+
+    return writeTextFile(*savePath, content.str());
+}
+
+bool App::exportIssueReport() {
+    const char* category = (issueCategoryIndex_ >= 0 &&
+                            issueCategoryIndex_ < static_cast<int>(issueCategories.size()))
+        ? issueCategories[issueCategoryIndex_]
+        : "Other";
+
+    std::string title = issueTitle_.data();
+    std::string details = issueDetails_.data();
+    if (title.empty() || details.empty()) {
+        return false;
+    }
+
+    auto state = agent_.worldState();
+    auto incidents = agent_.memory().getRecentIncidents(5);
+
+    auto savePath = chooseNativeSavePath(
+        "Save FikcerAgent Issue Report",
+        "fikcerAgent-issue-" + timestampSlug() + ".txt",
+        "txt");
+    if (!savePath) {
+        return false;
+    }
+
+    std::ostringstream content;
+    content << "FikcerAgent Issue Report\n";
+    content << "Generated: " << timestampSlug() << "\n";
+    content << "Category: " << category << "\n";
+    content << "Title: " << title << "\n\n";
+    content << "Details:\n" << details << "\n\n";
+    content << "Current System Snapshot:\n" << state.toSummary() << "\n";
+    content << "Recent Agent Logs:\n";
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& entry : logLines_) {
+            content << "[" << logLevelLabel(entry.level) << "] " << entry.text << '\n';
+        }
+    }
+
+    content << "\nRecent Recorded Reports:\n";
+    for (const auto& incident : incidents) {
+        content << "- [" << incident.severity << "] " << incident.problem << '\n';
+        if (!incident.rootCause.empty()) {
+            content << "  " << incident.rootCause << '\n';
+        }
+    }
+
+    return writeTextFile(*savePath, content.str());
+}
+
+bool App::writeTextFile(const std::filesystem::path& filePath,
+                        const std::string& content) {
+    std::ofstream out(filePath);
+    if (!out.is_open()) {
+        return false;
+    }
+
+    out << content;
+    return static_cast<bool>(out);
+}
+
+std::string App::currentTimestampSlug() const {
+    return timestampSlug();
 }
 
 // End of App

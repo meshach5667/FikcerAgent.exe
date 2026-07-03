@@ -669,6 +669,12 @@ bool Agent::submitUserIssue(const std::string& category,
             ? "medium"
             : "low";
 
+    const std::string eventSeverity = (incident.severity == "high")
+        ? "critical"
+        : (incident.severity == "medium")
+            ? "warn"
+            : "info";
+
     if (!memory_.recordIncident(incident)) {
         Logger::instance().warn("Agent: could not persist user issue report.");
     }
@@ -676,7 +682,7 @@ bool Agent::submitUserIssue(const std::string& category,
     requestDeepScan_.store(true);
 
     const std::string message = "User reported issue queued: " + cleanTitle;
-    emitEvent(AgentEvent::ALERT, message, incident.severity);
+    emitEvent(AgentEvent::ALERT, message, eventSeverity);
     emitEvent(AgentEvent::LOG,
               "I will investigate the reported issue during the next scan.",
               "info");
