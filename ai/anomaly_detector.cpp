@@ -6,6 +6,7 @@
 #include "utils/logger.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <numeric>
 #include <sstream>
@@ -57,6 +58,7 @@ std::vector<Anomaly> HeuristicAnalyzer::analyse(
     detectMemoryLeak(stats, anomalies);
     detectProcessHogs(processes, anomalies);
     detectSystemOverload(stats, anomalies);
+    detectSlowPc(stats, anomalies);
 
     return anomalies;
 }
@@ -281,6 +283,42 @@ void HeuristicAnalyzer::detectSystemOverload(
 
         out.push_back(std::move(a));
     }
+}
+
+// ── Detection: Slow PC ───────────────────────────────────────────────────
+
+static bool isSlowPcPressure(const core::SystemStats& stats) {
+    const bool cpuPressure = stats.cpuUsagePercent >= 75.0;
+    const bool memPressure = stats.memUsagePercent >= 75.0;
+    const bool mixedPressure = stats.cpuUsagePercent >= 60.0 &&
+                               stats.memUsagePercent >= 85.0;
+    return (cpuPressure && memPressure) || mixedPressure;
+}
+
+void HeuristicAnalyzer::detectSlowPc(
+    const core::SystemStats& stats, std::vector<Anomaly>& out)
+{
+    if (!isSlowPcPressure(stats)) {
+        return;
+    }
+
+    const double pressure = std::max(stats.cpuUsagePercent, stats.memUsagePercent);
+
+    Anomaly a;
+    a.type        = AnomalyType::SLOW_PC;
+    a.severity    = computeSeverity(pressure, 75.0);
+    a.metricValue = pressure;
+    a.timestamp   = std::chrono::steady_clock::now();
+
+    std::ostringstream oss;
+    oss << "The computer may feel slow because CPU is at "
+        << std::fixed << std::setprecision(1) << stats.cpuUsagePercent
+        << "% and memory is at " << stats.memUsagePercent << "%";
+    a.description = oss.str();
+    a.recommendation = "Reduce background load, close heavy applications, "
+                       "and check for a runaway process or memory pressure.";
+
+    out.push_back(std::move(a));
 }
 
 // ── Severity computation ───────────────────────────────────────────────────

@@ -39,6 +39,7 @@ enum class AnomalyType : uint8_t {
     PROCESS_CPU_HOG   = 5,   // Single process hogging CPU
     PROCESS_MEM_HOG   = 6,   // Single process hogging memory
     SYSTEM_OVERLOAD   = 7,   // Both CPU and RAM critical simultaneously
+    SLOW_PC           = 8,   // User-facing sluggishness / sustained pressure
     // ── System-level types (detected by deep scan + Gemini) ────────────
     DISK_SPACE_LOW    = 10,  // Disk partition running out of space
     DISK_HEALTH_WARN  = 11,  // Disk SMART warnings
@@ -80,6 +81,7 @@ enum class Severity : uint8_t {
         case AnomalyType::PROCESS_CPU_HOG:   return "PROC_CPU_HOG";
         case AnomalyType::PROCESS_MEM_HOG:   return "PROC_MEM_HOG";
         case AnomalyType::SYSTEM_OVERLOAD:   return "SYS_OVERLOAD";
+        case AnomalyType::SLOW_PC:           return "SLOW_PC";
         case AnomalyType::DISK_SPACE_LOW:    return "DISK_LOW";
         case AnomalyType::DISK_HEALTH_WARN:  return "DISK_HEALTH";
         case AnomalyType::NETWORK_DOWN:      return "NET_DOWN";
@@ -159,6 +161,7 @@ private:
     void detectProcessHogs(const std::vector<ProcessResourceInfo>& procs,
                            std::vector<Anomaly>& out);
     void detectSystemOverload(const core::SystemStats& stats, std::vector<Anomaly>& out);
+    void detectSlowPc(const core::SystemStats& stats, std::vector<Anomaly>& out);
 
     [[nodiscard]] Severity computeSeverity(double value, double threshold) const;
 

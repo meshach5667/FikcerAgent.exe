@@ -50,6 +50,14 @@ struct ApprovalRequest {
     std::string      resultDetails;
 };
 
+// ── User-reported issue ───────────────────────────────────────────────────
+
+struct UserIssueReport {
+    std::string category;
+    std::string title;
+    std::string details;
+};
+
 // ── Agent event callback ───────────────────────────────────────────────────
 
 struct AgentEvent {
@@ -118,6 +126,11 @@ public:
 
     /// Force an immediate deep scan.
     void requestDeepScan();
+
+    /// Record a user-reported issue and queue the agent to investigate it.
+    [[nodiscard]] bool submitUserIssue(const std::string& category,
+                                       const std::string& title,
+                                       const std::string& details);
 
     // ── Direct subsystem access (for GUI compatibility) ────────────────────
 

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
@@ -17,6 +18,30 @@ namespace fikcer::agent {
 using utils::Logger;
 
 namespace {
+
+static std::string trimCopy(const std::string& input) {
+    const auto start = input.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return {};
+    }
+    const auto end = input.find_last_not_of(" \t\r\n");
+    return input.substr(start, end - start + 1);
+}
+
+static bool containsIgnoreCase(const std::string& haystack,
+                               const std::string& needle) {
+    if (needle.empty()) {
+        return false;
+    }
+
+    std::string lowerHaystack = haystack;
+    std::string lowerNeedle = needle;
+    std::transform(lowerHaystack.begin(), lowerHaystack.end(), lowerHaystack.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(lowerNeedle.begin(), lowerNeedle.end(), lowerNeedle.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowerHaystack.find(lowerNeedle) != std::string::npos;
+}
 
 static std::string joinPreview(const std::vector<ai::Anomaly>& anomalies,
                                std::size_t maxItems = 2) {
@@ -614,6 +639,49 @@ std::vector<ActionPlan> Agent::recentPlans() const {
 
 void Agent::requestDeepScan() {
     requestDeepScan_ = true;
+}
+
+bool Agent::submitUserIssue(const std::string& category,
+                            const std::string& title,
+                            const std::string& details) {
+    const std::string cleanCategory = trimCopy(category);
+    const std::string cleanTitle = trimCopy(title);
+    const std::string cleanDetails = trimCopy(details);
+
+    if (cleanTitle.empty() || cleanDetails.empty()) {
+        Logger::instance().warn("Agent: rejected empty user issue report.");
+        return false;
+    }
+
+    IncidentRecord incident;
+    incident.problem = cleanTitle;
+    incident.rootCause = cleanCategory.empty()
+        ? cleanDetails
+        : "Category: " + cleanCategory + "\n" + cleanDetails;
+    incident.actionTaken = "Queued for agent investigation";
+    incident.result = "open";
+    incident.severity = (containsIgnoreCase(cleanCategory, "security") ||
+                         containsIgnoreCase(cleanTitle, "security"))
+        ? "high"
+        : (containsIgnoreCase(cleanCategory, "performance") ||
+           containsIgnoreCase(cleanTitle, "slow") ||
+           containsIgnoreCase(cleanTitle, "lag"))
+            ? "medium"
+            : "low";
+
+    if (!memory_.recordIncident(incident)) {
+        Logger::instance().warn("Agent: could not persist user issue report.");
+    }
+
+    requestDeepScan_.store(true);
+
+    const std::string message = "User reported issue queued: " + cleanTitle;
+    emitEvent(AgentEvent::ALERT, message, incident.severity);
+    emitEvent(AgentEvent::LOG,
+              "I will investigate the reported issue during the next scan.",
+              "info");
+
+    return true;
 }
 
 // ── Event emission ─────────────────────────────────────────────────────────
