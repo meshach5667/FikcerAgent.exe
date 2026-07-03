@@ -154,9 +154,7 @@ static int runCli() {
     return EXIT_SUCCESS;
 }
 
-// ============================================================================
-// main – dispatch to GUI or CLI
-// ============================================================================
+
 int main(int argc, char* argv[]) {
     bool cliMode = false;
     for (int i = 1; i < argc; ++i) {
