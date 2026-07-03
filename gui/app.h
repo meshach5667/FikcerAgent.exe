@@ -116,6 +116,7 @@ private:
     std::array<char, ISSUE_TITLE_MAX> issueTitle_{};
     std::array<char, ISSUE_DETAILS_MAX> issueDetails_{};
     int issueCategoryIndex_ = 0;
+    std::string issueStatusMessage_;
 };
 
 } // namespace fikcer::gui

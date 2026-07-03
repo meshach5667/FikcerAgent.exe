@@ -9,6 +9,10 @@ project(FikcerAgent
     DESCRIPTION "Autonomous self-healing cross-platform system agent with GUI"
 )
 
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS deployment target" FORCE)
+endif()
+
 # ── C++ Standard ────────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -91,6 +95,10 @@ set(HEADERS
 # ── Executable ──────────────────────────────────────────────────────────────
 add_executable(${PROJECT_NAME} ${SOURCES} ${IMGUI_SOURCES} ${HEADERS})
 
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES MACOSX_BUNDLE TRUE)
+endif()
+
 # Include paths: project root + Dear ImGui + ImGui backends
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -166,4 +174,20 @@ if(NOT MSVC)
 endif()
 
 # ── Install ─────────────────────────────────────────────────────────────────
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+if(APPLE)
+    install(TARGETS ${PROJECT_NAME} BUNDLE DESTINATION .)
+else()
+    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+endif()
+
+# ── Packaging ────────────────────────────────────────────────────────────────
+if(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_PACKAGE_NAME "FikcerAgent")
+    set(CPACK_PACKAGE_VENDOR "MESH")
+    set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+    set(CPACK_PACKAGE_FILE_NAME "FikcerAgent-${PROJECT_VERSION}-macOS")
+    set(CPACK_DMG_VOLUME_NAME "FikcerAgent")
+endif()
+
+include(CPack)

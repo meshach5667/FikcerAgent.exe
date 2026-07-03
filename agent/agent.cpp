@@ -658,8 +658,8 @@ bool Agent::submitUserIssue(const std::string& category,
     incident.rootCause = cleanCategory.empty()
         ? cleanDetails
         : "Category: " + cleanCategory + "\n" + cleanDetails;
-    incident.actionTaken = "Queued for agent investigation";
-    incident.result = "open";
+    incident.actionTaken = "Queued for immediate investigation";
+    incident.result = "queued";
     incident.severity = (containsIgnoreCase(cleanCategory, "security") ||
                          containsIgnoreCase(cleanTitle, "security"))
         ? "high"
@@ -684,7 +684,7 @@ bool Agent::submitUserIssue(const std::string& category,
     const std::string message = "User reported issue queued: " + cleanTitle;
     emitEvent(AgentEvent::ALERT, message, eventSeverity);
     emitEvent(AgentEvent::LOG,
-              "I will investigate the reported issue during the next scan.",
+              "I received your report and started an investigation pass immediately.",
               "info");
 
     return true;

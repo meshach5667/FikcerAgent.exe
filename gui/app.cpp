@@ -187,6 +187,16 @@ bool App::init() {
             alerts_.push_front(a);
             if (alerts_.size() > MAX_ALERTS) alerts_.pop_back();
         }
+
+        // Surface report progress in the Reports tab so submission does not feel like a silent save.
+        if (ev.type == agent::AgentEvent::LOG) {
+            std::lock_guard lock(mutex_);
+            if (ev.message.find("I am running a deeper scan") != std::string::npos) {
+                issueStatusMessage_ = "Investigation in progress. The agent has started a deeper scan.";
+            } else if (ev.message.find("After re-checking") != std::string::npos) {
+                issueStatusMessage_ = "Investigation refresh complete. Check the latest incident entry below.";
+            }
+        }
     });
 
     if (!agent_.init()) {
@@ -762,6 +772,18 @@ void App::drawIssueReporter() {
         "Send a problem description to the agent so it can investigate it on the next scan.");
     ImGui::Separator();
 
+    std::string statusMessage;
+    {
+        std::lock_guard lock(mutex_);
+        statusMessage = issueStatusMessage_;
+    }
+
+    if (!statusMessage.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(col::Green, "%s", statusMessage.c_str());
+        ImGui::Spacing();
+    }
+
     ImGui::Text("Category");
     ImGui::SetNextItemWidth(260.0f);
     ImGui::Combo("##issueCategory", &issueCategoryIndex_, issueCategories.data(),
@@ -786,11 +808,19 @@ void App::drawIssueReporter() {
             issueDetails_.data());
 
         if (accepted) {
+            {
+                std::lock_guard lock(mutex_);
+                issueStatusMessage_ = "Submitted. The agent is investigating this report now.";
+            }
             pushLog(LogEntry::INFO, std::string("User issue submitted: ") + issueTitle_.data());
             issueTitle_.fill('\0');
             issueDetails_.fill('\0');
             issueCategoryIndex_ = 0;
         } else {
+            {
+                std::lock_guard lock(mutex_);
+                issueStatusMessage_ = "Submission failed. The report was not saved.";
+            }
             pushLog(LogEntry::ERR, "Failed to submit user issue report.");
         }
     }
@@ -814,9 +844,18 @@ void App::drawIssueReporter() {
         ImGui::TextColored(col::Dim, "No reports have been recorded yet.");
     } else {
         for (const auto& incident : incidents) {
+            ImVec4 statusColor = col::Dim;
+            if (incident.result == "success") statusColor = col::Green;
+            else if (incident.result == "partial" || incident.result == "queued") statusColor = col::Yellow;
+            else if (incident.result == "failure" || incident.result == "regression") statusColor = col::Red;
+
             ImGui::BulletText("[%s] %s", incident.severity.c_str(), incident.problem.c_str());
+            ImGui::TextColored(statusColor, "  Status: %s", incident.result.c_str());
+            if (!incident.actionTaken.empty()) {
+                ImGui::TextColored(col::Dim, "  Next step: %s", incident.actionTaken.c_str());
+            }
             if (!incident.rootCause.empty()) {
-                ImGui::TextColored(col::Dim, "  %s", incident.rootCause.c_str());
+                ImGui::TextColored(col::Dim, "  Details: %s", incident.rootCause.c_str());
             }
         }
     }
