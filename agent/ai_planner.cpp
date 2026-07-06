@@ -23,7 +23,12 @@ std::vector<ActionPlan> AiPlanner::plan(
     const ToolRegistry& tools)
 {
     if (!gemini.isAvailable()) {
-        Logger::instance().warn("AiPlanner: Gemini not available, skipping.");
+        auto reason = gemini.lastError();
+        if (reason.empty()) {
+            reason = "no API key configured";
+        }
+        Logger::instance().warn(std::string("AiPlanner: Gemini not available (") +
+                                reason + "), skipping.");
         return {};
     }
 
@@ -42,7 +47,9 @@ std::vector<ActionPlan> AiPlanner::plan(
     }
 
     if (response.empty()) {
-        Logger::instance().warn("AiPlanner: empty response from Gemini.");
+        auto reason = gemini.lastError();
+        std::string suffix = reason.empty() ? std::string() : std::string(" (") + reason + ")";
+        Logger::instance().warn(std::string("AiPlanner: empty response from Gemini") + suffix);
         return {};
     }
 

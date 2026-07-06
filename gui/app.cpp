@@ -191,9 +191,9 @@ bool App::init() {
         // Surface report progress in the Reports tab so submission does not feel like a silent save.
         if (ev.type == agent::AgentEvent::LOG) {
             std::lock_guard lock(mutex_);
-            if (ev.message.find("I am running a deeper scan") != std::string::npos) {
+            if (ev.message.find("Deep scan started") != std::string::npos) {
                 issueStatusMessage_ = "Investigation in progress. The agent has started a deeper scan.";
-            } else if (ev.message.find("After re-checking") != std::string::npos) {
+            } else if (ev.message.find("Post-action verification") != std::string::npos) {
                 issueStatusMessage_ = "Investigation refresh complete. Check the latest incident entry below.";
             }
         }
@@ -583,13 +583,16 @@ void App::drawActivityFeed() {
 void App::drawGeminiPanel() {
     ImGui::Spacing();
 
-    if (!agent_.geminiReady()) {
+    if (agent_.geminiReady()) {
+        ImGui::TextColored(col::Green, "Gemini AI: connected (%s)",
+                           agent_.gemini().modelName().c_str());
+    } else {
         ImGui::TextColored(col::Yellow,
-            "Gemini AI is not available. Set the FIKCER_GEMINI_API_KEY "
-            "environment variable to enable.");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
+            "Gemini AI: unavailable. Set FIKCER_GEMINI_API_KEY or ~/.fikcerAgent/gemini_api_key.");
+        const auto lastError = agent_.gemini().lastError();
+        if (!lastError.empty()) {
+            ImGui::TextColored(col::Dim, "Last error: %s", lastError.c_str());
+        }
     }
 
     auto approvals = agent_.pendingApprovals();
@@ -597,7 +600,8 @@ void App::drawGeminiPanel() {
     // Status line
     ImGui::TextColored(col::Cyan, "Agent Autonomous Status:");
     ImGui::SameLine();
-    ImGui::TextColored(col::Green, "Active");
+    ImGui::TextColored(agent_.geminiReady() ? col::Green : col::Yellow,
+                       agent_.geminiReady() ? "AI ready" : "Heuristics only");
 
     ImGui::Separator();
     ImGui::Spacing();
@@ -931,14 +935,6 @@ void App::pushLog(LogEntry::Level lvl, const std::string& msg) {
     logLines_.push_back({lvl, msg});
     while (logLines_.size() > MAX_LOG_LINES)
         logLines_.pop_front();
-
-    // Also push to the file logger
-    auto& logger = utils::Logger::instance();
-    switch (lvl) {
-        case LogEntry::INFO: logger.info(msg); break;
-        case LogEntry::WARN: logger.warn(msg); break;
-        case LogEntry::ERR:  logger.error(msg); break;
-    }
 }
 
 bool App::exportLogLines() {

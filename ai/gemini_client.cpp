@@ -17,6 +17,21 @@ namespace fikcer::ai {
 
 using utils::Logger;
 
+namespace {
+
+static void trimInPlace(std::string& value) {
+    const auto start = value.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        value.clear();
+        return;
+    }
+
+    const auto end = value.find_last_not_of(" \t\r\n");
+    value = value.substr(start, end - start + 1);
+}
+
+} // namespace
+
 // ── libcurl write callback ─────────────────────────────────────────────────
 
 static size_t curlWriteCallback(char* ptr, size_t size, size_t nmemb,
@@ -81,7 +96,7 @@ std::string GeminiClient::loadApiKey() const {
     // 1. Environment variable.
     const char* envKey = std::getenv("FIKCER_GEMINI_API_KEY");
     if (envKey && std::strlen(envKey) > 0) {
-        Logger::instance().info(" API key loaded from environment variable.");
+        Logger::instance().info("AI: API key loaded from environment variable.");
         return std::string(envKey);
     }
 
@@ -101,12 +116,10 @@ std::string GeminiClient::loadApiKey() const {
             std::ifstream ifs(keyFile);
             std::string key;
             if (std::getline(ifs, key)) {
-                // Trim whitespace.
-                key.erase(0, key.find_first_not_of(" \t\r\n"));
-                key.erase(key.find_last_not_of(" \t\r\n") + 1);
+                trimInPlace(key);
                 if (!key.empty()) {
                     Logger::instance().info(
-                        " API key loaded from " + keyFile.string());
+                        "AI: API key loaded from " + keyFile.string());
                     return key;
                 }
             }
@@ -119,7 +132,7 @@ std::string GeminiClient::loadApiKey() const {
         std::ifstream ifs(envFile);
         std::string line;
         while (std::getline(ifs, line)) {
-            line.erase(0, line.find_first_not_of(" \t"));
+            trimInPlace(line);
             if (line.empty() || line[0] == '#') continue;
 
             auto eqPos = line.find('=');
@@ -129,8 +142,8 @@ std::string GeminiClient::loadApiKey() const {
             std::string val = line.substr(eqPos + 1);
 
             // Strip surrounding quotes (' or ").
-            val.erase(0, val.find_first_not_of(" \t"));
-            val.erase(val.find_last_not_of(" \t\r\n") + 1);
+            trimInPlace(key);
+            trimInPlace(val);
             if (val.size() >= 2) {
                 if ((val.front() == '\'' && val.back() == '\'') ||
                     (val.front() == '"'  && val.back() == '"')) {
@@ -139,7 +152,7 @@ std::string GeminiClient::loadApiKey() const {
             }
 
             if (key == "FIKCER_GEMINI_API_KEY" && !val.empty()) {
-                Logger::instance().info("Gemini API key loaded from .env file.");
+                Logger::instance().info("AI: API key loaded from .env file.");
                 return val;
             }
         }
@@ -297,6 +310,7 @@ std::string GeminiClient::httpPost(const std::string& url,
 std::string GeminiClient::ask(const std::string& prompt, bool expectJson) {
     if (!available_) {
         lastError_ = "AI client not initialised.";
+        Logger::instance().warn("AI: " + lastError_);
         return "";
     }
 
@@ -384,8 +398,7 @@ std::vector<GeminiProblem> GeminiClient::parseProblems(
 
     while (std::getline(stream, line)) {
         // Trim.
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        trimInPlace(line);
 
         if (line.substr(0, 8) != "PROBLEM|") continue;
 

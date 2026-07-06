@@ -53,11 +53,58 @@ static std::string joinPreview(const std::vector<ai::Anomaly>& anomalies,
     const std::size_t count = std::min(maxItems, anomalies.size());
     for (std::size_t i = 0; i < count; ++i) {
         if (i) oss << "; ";
-        oss << anomalies[i].description;
+        oss << ai::anomalyTag(anomalies[i].type) << " "
+            << ai::severityTag(anomalies[i].severity) << ": "
+            << anomalies[i].description;
     }
     if (anomalies.size() > count) {
         oss << "; and " << (anomalies.size() - count) << " more";
     }
+    return oss.str();
+}
+
+static std::string goalPreview(const std::vector<Goal>& goals,
+                               std::size_t maxItems = 3) {
+    if (goals.empty()) {
+        return "no blocked goals";
+    }
+
+    std::ostringstream oss;
+    const std::size_t count = std::min(maxItems, goals.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i) oss << "; ";
+        oss << goals[i].name;
+    }
+    if (goals.size() > count) {
+        oss << "; and " << (goals.size() - count) << " more";
+    }
+    return oss.str();
+}
+
+static std::string topProcessPreview(const WorldState& state) {
+    if (state.topProcesses.empty()) {
+        return "no standout process hogs";
+    }
+
+    const auto& proc = state.topProcesses.front();
+    std::ostringstream oss;
+    oss << proc.name;
+    if (proc.pid != 0) {
+        oss << " (PID " << proc.pid << ')';
+    }
+    oss << " at " << std::fixed << std::setprecision(1)
+        << proc.cpuPercent << "% CPU";
+
+    if (state.topProcesses.size() > 1) {
+        const auto& next = state.topProcesses[1];
+        oss << "; next: " << next.name;
+        if (next.pid != 0) {
+            oss << " (PID " << next.pid << ')';
+        }
+        oss << " at " << std::fixed << std::setprecision(1)
+            << next.cpuPercent << "% CPU";
+    }
+
     return oss.str();
 }
 
@@ -75,15 +122,18 @@ static std::string healActionToText(actions::HealAction action) {
 
 static std::string healthSnapshotText(const WorldState& state) {
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(0);
-    oss << "I refreshed the system snapshot: CPU " << state.cpuPercent
-        << "%, memory " << state.memPercent << "%, disk "
-        << state.maxDiskPercent << "%.";
+    oss << std::fixed << std::setprecision(1);
+    oss << "Snapshot @ " << state.timestamp << ": health " << state.healthScore
+        << "/100, CPU " << state.cpuPercent << "%, RAM " << state.memPercent
+        << "%, disk " << state.maxDiskPercent << "%";
+    oss << ". Top process: " << topProcessPreview(state) << ".";
     if (!state.activeThreats.empty()) {
-        oss << " I can still see " << state.activeThreats.size()
-            << " security threat(s).";
+        oss << " Threats: " << state.activeThreats.size() << ".";
     } else {
-        oss << " I do not see any active security threats right now.";
+        oss << " No active security threats are visible right now.";
+    }
+    if (!state.activeAnomalies.empty()) {
+        oss << " Live anomalies: " << state.activeAnomalies.size() << ".";
     }
     return oss.str();
 }
@@ -128,9 +178,9 @@ bool Agent::init() {
 
     healer_.setCallback([this](const actions::HealRecord& rec) {
         std::ostringstream msg;
-        msg << "Auto-heal " << (rec.success ? "worked" : "needs attention")
-            << ": " << healActionToText(rec.action) << " for "
-            << rec.processName;
+        msg << "[heal:" << ai::anomalyTag(rec.cause) << "/"
+            << ai::severityTag(rec.severity) << "] "
+            << healActionToText(rec.action) << " for " << rec.processName;
         if (!rec.description.empty()) {
             msg << " — " << rec.description;
         }
@@ -243,7 +293,7 @@ void Agent::agentTick() {
 
         // Full deep scan.
         emitEvent(AgentEvent::LOG,
-                  "I am running a deeper scan to check health, security, and any blocked actions.",
+                  "Deep scan started: checking health, security, disk pressure, and blocked actions.",
                   "info");
         auto diag = scanner_.scan();
         {
@@ -317,16 +367,21 @@ void Agent::analyze() {
             latestAnomalies_ = anomalies;
         }
 
+        std::ostringstream liveIssueMsg;
+        liveIssueMsg << "Heuristic scan found " << anomalies.size()
+                     << " live issue(s) at CPU " << std::fixed << std::setprecision(1)
+                     << stats.cpuUsagePercent << "%, RAM " << stats.memUsagePercent
+                     << "%: " << joinPreview(anomalies) << ".";
+
         emitEvent(AgentEvent::ALERT,
-                  "I found " + std::to_string(anomalies.size()) +
-                  " live issue(s): " + joinPreview(anomalies) + ".",
+                  liveIssueMsg.str(),
                   "warn");
 
         // Auto-heal heuristic anomalies.
         healer_.handleAnomalies(anomalies);
     } else {
         emitEvent(AgentEvent::LOG,
-                  "I did not find any new live performance problems in this pass.",
+                  "Heuristic scan cleared this pass: no new CPU, memory, or process hogs.",
                   "info");
     }
 }
@@ -341,8 +396,14 @@ void Agent::reason() {
     }
     goalMgr_.evaluate(state);
 
+    const auto allGoals = goalMgr_.goals();
+    const auto blockedGoals = goalMgr_.unsatisfiedGoals();
+    const std::size_t satisfiedGoals = allGoals.size() - blockedGoals.size();
+
     emitEvent(AgentEvent::LOG,
-              "I compared the current system state against the active goals.",
+              "Goal check complete: " + std::to_string(satisfiedGoals) +
+              "/" + std::to_string(allGoals.size()) +
+              " goals are satisfied. Blockers: " + goalPreview(blockedGoals) + ".",
               "info");
 }
 
@@ -371,12 +432,12 @@ void Agent::plan() {
 
     if (plans.empty()) {
         emitEvent(AgentEvent::LOG,
-                  "The AI did not find any fixes that need action right now.",
+                  "AI planner returned no actionable fixes for this cycle.",
                   "info");
     } else {
         emitEvent(AgentEvent::ALERT,
-                  "The AI prepared " + std::to_string(plans.size()) +
-                  " fix plan(s) and I will check them against the allowed tools.",
+                  "AI planner drafted " + std::to_string(plans.size()) +
+                  " fix plan(s); validating them against the tool catalog.",
                   "warn");
     }
 }
@@ -406,9 +467,9 @@ void Agent::decide() {
                 // Execute immediately.
                 auto result = tools_.execute(p.recommendedAction, p.parameters);
                 emitEvent(AgentEvent::ACTION_TAKEN,
-                          std::string("I ran the low-risk fix automatically: ") +
+                          std::string("Auto-executed low-risk fix: ") +
                           p.recommendedAction +
-                          (result.success ? " and it worked." : " and it failed."),
+                          (result.success ? " succeeded." : " failed."),
                           result.success ? "info" : "warn");
 
                 // Reflect.
@@ -435,7 +496,7 @@ void Agent::decide() {
                 auto result = tools_.execute(p.recommendedAction, p.parameters);
 
                 emitEvent(AgentEvent::ACTION_TAKEN,
-                          "I ran a fix that may affect the session: " +
+                          "Applied a session-affecting fix: " +
                           p.recommendedAction + ". " + impact.impactDescription,
                           "warn");
 
@@ -466,7 +527,7 @@ void Agent::decide() {
                 approvals_.push_back(std::move(req));
 
                 emitEvent(AgentEvent::APPROVAL_NEEDED,
-                          "I found a higher-risk fix and need your approval before I continue: " +
+                          "Higher-risk fix needs approval before execution: " +
                           p.recommendedAction + ". " + impact.impactDescription,
                           "warn");
                 break;
@@ -474,7 +535,7 @@ void Agent::decide() {
 
             case ApprovalRequirement::BLOCKED: {
                 emitEvent(AgentEvent::LOG,
-                          "I skipped " + p.recommendedAction +
+                          "Blocked by user preference: " + p.recommendedAction +
                           " because your preferences block it.",
                           "info");
                 break;
@@ -521,8 +582,8 @@ void Agent::act() {
         req.resultDetails = result.success ? result.output : result.error;
 
         emitEvent(AgentEvent::ACTION_TAKEN,
-                  "I ran your approved fix: " + req.plan.recommendedAction +
-                  (result.success ? " and it succeeded." : " and it failed."),
+                  "Applied approved fix: " + req.plan.recommendedAction +
+                  (result.success ? " succeeded." : " failed."),
                   result.success ? "info" : "warn");
 
         // Reflect & learn.
@@ -566,9 +627,14 @@ void Agent::verify() {
     goalMgr_.evaluate(state);
 
     emitEvent(AgentEvent::HEALTH_UPDATE,
-              "After re-checking, the system health is " +
+              "Post-action verification: health " +
               std::to_string(static_cast<int>(health)) + "/100 (" +
-              std::string(healthTierTag(HealthScoreEngine::tier(health))) + ")",
+              std::string(healthTierTag(HealthScoreEngine::tier(health))) +
+              "), CPU " + std::to_string(static_cast<int>(state.cpuPercent)) +
+              "%, RAM " + std::to_string(static_cast<int>(state.memPercent)) +
+              "%, disk " + std::to_string(static_cast<int>(state.maxDiskPercent)) +
+              "%, threats " + std::to_string(state.activeThreats.size()) +
+              ", anomalies " + std::to_string(state.activeAnomalies.size()) + ".",
               health >= 90.0 ? "info" : (health >= 70.0 ? "warn" : "error"));
 }
 
@@ -579,7 +645,7 @@ void Agent::learn() {
     // This phase just logs the overall learning state.
     double overallRate = learning_.overallSuccessRate(memory_);
     std::ostringstream msg;
-    msg << "I recorded the latest outcome. My overall action success rate is "
+    msg << "Learning update: overall action success rate is "
         << static_cast<int>(overallRate * 100) << "%.";
     emitEvent(AgentEvent::LOG, msg.str(), "info");
 }
@@ -681,10 +747,10 @@ bool Agent::submitUserIssue(const std::string& category,
 
     requestDeepScan_.store(true);
 
-    const std::string message = "User reported issue queued: " + cleanTitle;
+    const std::string message = "User report queued for investigation: " + cleanTitle;
     emitEvent(AgentEvent::ALERT, message, eventSeverity);
     emitEvent(AgentEvent::LOG,
-              "I received your report and started an investigation pass immediately.",
+              "Investigation queued immediately for the submitted user report.",
               "info");
 
     return true;
