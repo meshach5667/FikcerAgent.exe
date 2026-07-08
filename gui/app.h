@@ -26,7 +26,7 @@ struct GLFWwindow;   // Forward declaration – no GLFW include in header.
 
 namespace fikcer::gui {
 
-// ── Log ring buffer entry ──────────────────────────────────────────────────
+// ── Log ring buffer entry
 struct LogEntry {
     enum Level { INFO, WARN, ERR };
     Level       level = INFO;

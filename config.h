@@ -52,7 +52,7 @@ inline constexpr std::size_t MAX_LOG_FILES = 10;
 /// Log file base name.
 inline constexpr std::string_view LOG_FILE_PREFIX = "fikcerAgent";
 
-// ── AI / Anomaly Detection ─────────────────────────────────────────────────
+// ── AI / Anomaly Detection 
 /// Interval (ms) between heuristic AI analysis passes.
 inline constexpr unsigned int AI_SCAN_INTERVAL_MS = 5000;
 
