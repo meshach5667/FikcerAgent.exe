@@ -258,15 +258,7 @@ All tuneable values live in [`config.h`](config.h):
 | `CPU_RAMP_DELTA` | 15% | Rapid CPU increase threshold per sample |
 | `MEMORY_LEAK_WINDOW_SAMPLES` | 12 | Samples for leak detection window |
 
-### AI & Approval
 
-| Constant | Default | Purpose |
-|----------|---------|---------|
-| `GEMINI_MODEL` | `gemini-2.0-flash` | AI model for reasoning and planning |
-| `GEMINI_MAX_CALLS_PER_HOUR` | 30 | Rate limiting for Gemini API |
-| `AUTO_FIX_ENABLED` | `true` | Enable automatic low-risk action execution |
-| `AUTO_FIX_MAX_SEVERITY` | `"MEDIUM"` | Max severity auto-fixed without approval |
-| `DRY_RUN` | `false` | Disable actual process kill/restart (log only) |
 
 ### Process Management & Healing
 
