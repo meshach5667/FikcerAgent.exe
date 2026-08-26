@@ -6,7 +6,7 @@
 
 ---
 
-## 🎯 Core Capabilities
+## Core Capabilities
 
 ### **1. Comprehensive Anomaly Detection**
 
@@ -104,7 +104,7 @@ The AI planner generates remediation strategies that:
 
 ---
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions are welcome! Whether you're fixing bugs, improving performance, adding new anomaly detectors, or expanding tool capabilities, we appreciate your help in making FikcerAgent smarter.
 
@@ -178,13 +178,13 @@ Please include:
 
 ---
 
-## 📄 License
+##  License
 
 [Your License Here]
 
 ---
 
-## 🎯 Vision
+## Vision
 
 FikcerAgent represents the future of autonomous system management—where AI agents work proactively to keep endpoints secure, healthy, and performant without requiring constant user intervention. By combining heuristic anomaly detection with advanced LLM reasoning, we create a system that learns, adapts, and improves over time.
 
@@ -282,7 +282,7 @@ All tuneable values live in [`config.h`](config.h):
 
 ---
 
-## 🔐 Security & Approval Workflow
+##  Security & Approval Workflow
 
 ### Safe by Design
 
@@ -319,7 +319,7 @@ procMgr.addToWhitelist("Code.exe");
 
 ---
 
-## 🧠 Skill Categories & Tool Catalog
+## Skill Categories & Tool Catalog
 
 The agent organizes remediation capabilities into four skill categories:
 
@@ -352,7 +352,7 @@ The agent organizes remediation capabilities into four skill categories:
 
 ---
 
-## 🌐 AI Integration (Gemini API)
+##  AI Integration (Gemini API)
 
 ### Prerequisites
 
@@ -379,7 +379,7 @@ The agent organizes remediation capabilities into four skill categories:
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 FikcerAgent implements the **Observe → Analyze → Reason → Plan → Decide → Act → Verify → Learn** loop:
 
@@ -438,7 +438,7 @@ FikcerAgent implements the **Observe → Analyze → Reason → Plan → Decide 
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 FikcerAgent/
@@ -528,7 +528,7 @@ export FIKCER_LOG_LEVEL="INFO"
 
 ---
 
-## ✅ Running the Agent
+##  Running the Agent
 
 ### First Time Setup
 
